@@ -253,3 +253,32 @@ Returns the full audit trail: fix commands, closure events, timestamps.
 - **UI for fix commands**: Commands are PR-comment-based. No UI trigger yet.
 - **Fix confirmation feedback**: Bot does not yet post a confirmation comment after pushing the fix commit.
 - **Async closure**: Currently reconciliation runs synchronously during re-review dispatch. Full async (after bot completes review) is future work.
+
+---
+
+## 6. #285 Completion Callback — E2E Proven
+
+### How It Works
+
+1. Reviewer bot posts GitHub PR review via `gov_create_pr_review`
+2. Bot calls `gov_report_review_completion` with structured findings
+3. Control plane persists findings into `review_findings` table
+4. Run status updated to COMPLETED with verdict + finding_count
+5. Review artifact (GitHub review_id) persisted in audit trail
+
+### E2E Evidence (2026-03-28)
+
+| Item | Value |
+|------|-------|
+| Run ID | `19738df3-6857-4618-b334-91d173fe637a` |
+| PR | #104 |
+| Bot | `code-review` |
+| Verdict | REQUEST_CHANGES |
+| Findings persisted | 10 (4 critical, 3 high, 3 medium) |
+| GitHub review ID | `4025697608` |
+
+### Tool Bridge
+
+- **Tool**: `gov_report_review_completion`
+- **Endpoint**: `POST /api/v1/governance/qa/report-review-completion`
+- **Registered in**: reviewer role contract (QA tools)
