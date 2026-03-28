@@ -88,35 +88,7 @@
             "group": "Contracts",
             "pages": [
               "operations/cicd-contract",
-              "operations/environment-contract",
               "operations/documentation-governance"
-            ]
-          },
-          {
-            "group": "Infrastructure",
-            "pages": [
-              "operations/cloudflare-tunnel",
-              "operations/environment-migration",
-              "operations/migration-uat",
-              "operations/mem0-production-summary"
-            ]
-          },
-          {
-            "group": "Runbooks",
-            "pages": [
-              "runbooks/fresh-deploy",
-              "runbooks/a2a-operations"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Milestones",
-        "groups": [
-          {
-            "group": "Active",
-            "pages": [
-              "milestones/m6.2-deterministic-delivery"
             ]
           }
         ]

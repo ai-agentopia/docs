@@ -2,6 +2,14 @@
 # .git, .github, .claude, .agents, .idea, node_modules,
 # README.md, LICENSE.md, CHANGELOG.md, CONTRIBUTING.md
 
-# Draft content
-drafts/
-*.draft.mdx
+# Internal-only docs (contain infra details, secrets paths, internal hostnames)
+runbooks/
+milestones/
+operations/cloudflare-tunnel.md
+operations/environment-migration.md
+operations/environment-contract.md
+operations/migration-uat.md
+operations/mem0-production-summary.md
+
+# Assets not for web
+Agentopia-avatar.png
