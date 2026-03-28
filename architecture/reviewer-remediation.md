@@ -282,3 +282,45 @@ Returns the full audit trail: fix commands, closure events, timestamps.
 - **Tool**: `gov_report_review_completion`
 - **Endpoint**: `POST /api/v1/governance/qa/report-review-completion`
 - **Registered in**: reviewer role contract (QA tools)
+
+---
+
+## 7. Atomic Review Boundary Correction
+
+### Problem
+The original two-step flow (`gov_create_pr_review` → `gov_report_review_completion`) was structurally unreliable. The reviewer bot's A2A task completed after the first tool call, leaving the second call (findings persistence) unexecuted. This is a single-bot runtime completion semantics issue, not a multi-bot problem.
+
+### Solution: `gov_submit_structured_pr_review`
+A new atomic governance tool that posts the GitHub review AND persists structured findings in one tool execution path:
+
+1. Posts GitHub PR review → gets `review_id`, `review_url`
+2. Persists findings into `review_findings`
+3. Updates run status to COMPLETED with verdict
+4. Records audit trail
+
+If GitHub review posts but persistence fails, the failure is recorded explicitly — the run is never left in a half-complete state.
+
+### Old vs New Protocol
+
+**Old (unreliable):**
+```
+Step 4: gov_create_pr_review    ← bot finishes turn here
+Step 5: gov_report_review_completion  ← often skipped
+```
+
+**New (atomic):**
+```
+Step 4: gov_submit_structured_pr_review  ← one call does both
+```
+
+### Fallback
+- `gov_report_review_completion` remains as fallback for legacy/compatibility
+- `gov_create_pr_review` remains for workflow-mode reviewers (orchestrator path)
+- `review_watchdog.py` handles recovery for stuck DISPATCHED runs
+
+### What Part of #285 Is Actually Closed
+- **Closed**: Findings persistence via atomic tool path — review submission and findings are no longer split
+- **Closed**: Run status + verdict + finding_count updated atomically
+- **Closed**: Audit trail for atomic review submission
+- **Partial**: `fix_commit_sha` capture requires bot to report after `gov_push_files` (future)
+- **Partial**: Finding-level closure comparison runs during re-review but depends on findings being persisted (now unblocked)
