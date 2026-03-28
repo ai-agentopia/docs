@@ -1,68 +1,122 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Agentopia",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#6366F1",
+    "light": "#818CF8",
+    "dark": "#4F46E5"
   },
   "favicon": "/favicon.svg",
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Architecture",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Overview",
             "pages": [
               "index",
-              "quickstart",
-              "development"
+              "architecture/overview"
             ]
           },
           {
-            "group": "Customization",
+            "group": "System Design",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "architecture/chatbot-architecture",
+              "architecture/architecture-multiple-bot",
+              "architecture/repo-split-notes"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "A2A Protocol",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "architecture/a2a-full-design",
+              "architecture/a2a-solution-protocol",
+              "architecture/a2a-improvement-plan",
+              "architecture/a2a-comparison"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Governed Code Review",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "architecture/governed-pr-review-workflow",
+              "architecture/reviewer-remediation"
+            ]
+          },
+          {
+            "group": "Design Proposals",
+            "pages": [
+              "architecture/p0.5-deterministic-delivery-start",
+              "architecture/p1-execution-authorization"
+            ]
+          },
+          {
+            "group": "Decision Records",
+            "pages": [
+              "adrs/005-relay-deprecation-timeline",
+              "adrs/007-integrations-abstraction"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "Product",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Services",
             "pages": [
-              "api-reference/introduction"
+              "product/bot-config-api",
+              "product/mem0-api"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "UI/UX",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "product/uiux-redesign-milestone",
+              "product/uiux-dev-handoff",
+              "product/uiux-layout-spec",
+              "product/uiux-issues"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Operations",
+        "groups": [
+          {
+            "group": "Contracts",
+            "pages": [
+              "operations/cicd-contract",
+              "operations/environment-contract",
+              "operations/documentation-governance"
+            ]
+          },
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "operations/cloudflare-tunnel",
+              "operations/environment-migration",
+              "operations/migration-uat",
+              "operations/mem0-production-summary"
+            ]
+          },
+          {
+            "group": "Runbooks",
+            "pages": [
+              "runbooks/fresh-deploy",
+              "runbooks/a2a-operations"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Milestones",
+        "groups": [
+          {
+            "group": "Active",
+            "pages": [
+              "milestones/m6.2-deterministic-delivery"
             ]
           }
         ]
@@ -71,14 +125,9 @@
     "global": {
       "anchors": [
         {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
+          "anchor": "GitHub",
+          "href": "https://github.com/ai-agentopia",
+          "icon": "github"
         }
       ]
     }
@@ -88,35 +137,21 @@
     "dark": "/logo/dark.svg"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
       "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
+      "label": "GitHub",
+      "href": "https://github.com/ai-agentopia"
     }
   },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
+  "search": {
+    "prompt": "Search Agentopia docs..."
+  },
+  "modeToggle": {
+    "default": "dark"
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/ai-agentopia"
     }
   }
 }
