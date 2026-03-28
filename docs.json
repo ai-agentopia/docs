@@ -133,8 +133,8 @@
     }
   },
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "/logo/agentopia.png",
+    "dark": "/logo/agentopia.png"
   },
   "navbar": {
     "primary": {
