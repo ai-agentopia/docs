@@ -396,7 +396,7 @@ Layer 2 is defense-in-depth: if executor receives a message with a `turn_id` it 
 #### 4.5a: Persistent Usage Logging
 
 ```python
-# Usage DB: /openclaw-state/a2a-usage.db (persistent on EFS/PVC)
+# Usage DB: /openclaw-state/a2a-usage.db (persistent on local-path PVC)
 # Override: A2A_USAGE_DB env var
 # Old path /tmp/ was lost on pod restart — migrated to persistent storage
 ```

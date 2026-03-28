@@ -4,6 +4,9 @@ title: "Mem0 OSS Production Setup - Summary"
 
 # Mem0 OSS Production Setup - Summary
 
+> **Note:** This document describes the initial standalone deployment (2026-02-21).
+> mem0-api now runs as a Kubernetes pod in the agentopia namespace on the k3s cluster.
+
 **Date:** 2026-02-21
 **Status:** Production Ready
 

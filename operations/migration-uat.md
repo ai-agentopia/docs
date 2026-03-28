@@ -11,12 +11,12 @@ Create a UAT environment under GitHub org `ai-agentopia`, running alongside the 
 | | DEV (unchanged) | UAT (new) |
 |---|---|---|
 | **GitHub Org** | `thanhth2813` | `ai-agentopia` |
-| **Registry** | `ghcr.io/thanhth2813/` | `ghcr.io/ai-agentopia/` |
+| **Registry** | `ghcr.io/ai-agentopia/` | `ghcr.io/ai-agentopia/` |
 | **Cluster** | k3s server36 | k3s server36 (same) |
 | **Namespace** | `agentopia` | `agentopia-uat` |
 | **ArgoCD** | Shared | Shared |
 | **Infra** | Existing | All new, isolated |
-| **Bots** | Existing | Created fresh from UI |
+| **Bots** | Existing | Created fresh from agentopia-ui |
 
 **Goal**: Prove 90-95% automation — empty namespace to working platform with minimal manual steps.
 
@@ -560,26 +560,26 @@ kubectl exec -n agentopia-uat neo4j-0 -- cypher-shell -u neo4j -p "$NEO4J_PASSWO
 kubectl exec -n agentopia-uat deploy/bot-config-api -- python3 -c "from db.db_migrate import check_connection; check_connection()"
 ```
 
-### Access bot-config-api UI
+### Access bot-config-api health endpoint
 
 ```bash
 # From local machine (use port 8002 to avoid conflict with DEV on 8001):
 ssh -L 8002:localhost:8002 server36 \
   "KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl port-forward -n agentopia-uat svc/bot-config-api 8002:80"
 
-# Open http://localhost:8002/ui
+# Open http://localhost:8002/health
 ```
 
 ---
 
-## Phase 5 — Create Bots from UI
+## Phase 5 — Create Bots from agentopia-ui
 
 **Who**: CTO
 **Time**: 15 minutes
 
-This phase proves the automation. No kubectl, no scripts — just the UI.
+This phase proves the automation. No kubectl, no scripts — just agentopia-ui.
 
-1. Open `http://localhost:8002/ui`
+1. Open agentopia-ui (tunnel to `http://localhost:8002` or via ingress)
 2. Click "Deploy Bot"
 3. Fill form:
    - Role template: pick any (e.g., "backend")
@@ -606,8 +606,8 @@ Repeat for 2-3 bots to prove consistency.
 | **CI** | Images on `ghcr.io/ai-agentopia/` | `docker pull` succeeds for all 6 images |
 | **Infra** | All base pods Running | `kubectl get pods -n agentopia-uat` shows all healthy |
 | **Vault** | Unsealed + keys accessible | `vault status` shows Sealed=false |
-| **UI** | bot-config-api UI accessible | `http://localhost:8002/ui` loads |
-| **Bot Deploy** | Create bot from UI → pod Running | Within 5 min, no manual kubectl |
+| **UI** | bot-config-api health accessible | `http://localhost:8002/health` returns ok |
+| **Bot Deploy** | Create bot from agentopia-ui → pod Running | Within 5 min, no manual kubectl |
 | **Chat** | Send message via web → get response | Bot responds coherently |
 | **A2A** | Bot discovers peers + relays | `a2a_discover_agents` returns results |
 | **Automation** | Manual steps count | ≤ 6 manual commands total |

@@ -13,8 +13,8 @@ How to deploy Agentopia on a new Kubernetes cluster (k3s, EKS, GKE, etc.).
 ```
 ┌─────────────┐     git push      ┌──────────────┐     sync      ┌─────────────┐
 │ bot-config-  │ ──────────────►  │   GitHub      │ ◄──────────  │   ArgoCD    │
-│ api (UI)     │                  │   (GitOps)    │              │   (cluster) │
-└──────┬───────┘                  └──────────────┘              └──────┬──────┘
+│ api (API-    │                  │   (GitOps)    │              │   (cluster) │
+│ only)        │                  └──────────────┘              └──────┬──────┘
        │ K8s API                                                       │ Helm
        ▼                                                               ▼
 ┌──────────────┐                                              ┌──────────────┐
@@ -25,7 +25,7 @@ How to deploy Agentopia on a new Kubernetes cluster (k3s, EKS, GKE, etc.).
 
 Bot deploy/delete goes through **two paths simultaneously**:
 - **K8s direct**: ConfigMap + Secret created/deleted immediately
-- **Git push**: ApplicationSet yaml updated → ArgoCD syncs → Helm deploys/prunes pod
+- **Git push**: Application CRD created by bot-config-api → ArgoCD syncs → Helm deploys/prunes pod
 
 ---
 
@@ -36,7 +36,7 @@ Each environment needs **2 ArgoCD manifest files** in `argocd/`:
 | File | Kind | Purpose |
 |---|---|---|
 | `agentopia-base-<env>.yaml` | Application | Shared infra (Qdrant, Neo4j, Vault, mem0, bot-config-api, llm-proxy, postgres, redis) |
-| `agentopia-bots-<env>.yaml` | ApplicationSet | Bot list — one Application per bot element |
+| `agentopia-bots-<env>.yaml` | Application CRDs | Bot list — one Application CRD per bot, created directly by bot-config-api |
 
 ### Critical: `botsYamlPath`
 
@@ -50,7 +50,7 @@ helm:
       botsYamlPath: "argocd/agentopia-bots-<env>.yaml"   # ← MUST match
 ```
 
-If missing or wrong → bot-config-api writes to the **EKS default** (`argocd/agentopia-bots.yaml`), so bots created from UI will not appear in the target env.
+If missing or wrong → bot-config-api writes to the **EKS default** (`argocd/agentopia-bots.yaml`), so bots deployed via the API will not appear in the target env.
 
 ### Environment-Specific Overrides
 
@@ -82,7 +82,7 @@ botConfigApi:
     annotations: {}              # EKS needs ALB annotations
 ```
 
-For bots ApplicationSet, override persistence in the Helm template values:
+For bot Application CRDs, override persistence in the Helm template values:
 
 ```yaml
 # argocd/agentopia-bots-<env>.yaml → template.spec.source.helm.valuesObject
@@ -176,13 +176,13 @@ persistence:
 □ bot-config-api health:
     kubectl exec deploy/bot-config-api -n agentopia -- curl -s localhost:8001/health
 
-□ Access UI (SSH tunnel or ingress):
+□ Access health endpoint (SSH tunnel or ingress):
     ssh -L 8001:localhost:8001 <host> \
       "KUBECONFIG=... kubectl port-forward -n agentopia svc/bot-config-api 8001:80"
-    → http://localhost:8001/ui
+    → http://localhost:8001/health
 
-□ Deploy a test bot from UI → verify pod starts
-□ Delete test bot from UI → verify pod removed + git cleaned up
+□ Deploy a test bot from agentopia-ui → verify pod starts
+□ Delete test bot from agentopia-ui → verify pod removed + git cleaned up
 ```
 
 ---
@@ -200,15 +200,15 @@ User clicks "Deploy Bot" on UI
   │    Create: agentopia-soul-<bot> ConfigMap
   │    Create: agentopia-gateway-env-<bot> Secret
   │
-  ├─ Step 3: Git Push (atomic commit, 4 files)
+  ├─ Step 3: Git Push (atomic commit, 4 files) + Application CRD
   │    bots/<bot>/SOUL.md
   │    bots/<bot>/USER.md
   │    bots/<bot>/bot.yaml
-  │    argocd/agentopia-bots-<env>.yaml  ← new element added
+  │    argocd/agentopia-bots-<env>.yaml  ← Application CRD created by bot-config-api
   │    (path determined by BOTS_YAML_PATH env var)
   │
   └─ Step 4: ArgoCD Sync (~30s)
-       Detects git change → Helm renders agentopia-bot chart
+       Detects Application CRD → Helm renders agentopia-bot chart
        → Deployment + Service + PVC + token Secret created
        → Pod starts, reads SOUL from ConfigMap, token from Secret
 ```
@@ -227,7 +227,7 @@ User clicks "Delete" on UI
   │    Delete: agentopia-gateway-env-<bot> Secret
   │
   └─ Step 3: ArgoCD Sync
-       Element removed from ApplicationSet → Application pruned
+       Application CRD removed → ArgoCD cascade prune
        → prune: true → Deployment, Service, Secret deleted
        → PVC retained (Helm reclaim policy: keep)
 ```
@@ -238,8 +238,8 @@ User clicks "Delete" on UI
 
 | Issue | Cause | Fix |
 |---|---|---|
-| Bot created on UI but no pod appears | `botsYamlPath` wrong or missing → writes to EKS file | Set correct `botsYamlPath` in base Application |
-| Bot deleted on UI but pod stays | Same as above — delete modifies wrong file | Same fix |
+| Bot created but no pod appears | `botsYamlPath` wrong or missing → writes to EKS file | Set correct `botsYamlPath` in base Application |
+| Bot deleted but pod stays | Same as above — delete modifies wrong file | Same fix |
 | `ImagePullBackOff` | Missing `ghcr-pull-secret` | Run `scripts/create-secrets.sh` with `GHCR_PAT` |
 | Application error "project not found" | ArgoCD project `infra` not created | Create AppProject (see Phase 2) |
 | Git push step skipped silently | `bot-config-api-github` Secret missing | Create secret with `GITHUB_TOKEN`, `GITHUB_REPO`, `GITHUB_BRANCH` |
@@ -253,5 +253,5 @@ User clicks "Delete" on UI
 
 | Env | Base File | Bots File | StorageClass | Ingress |
 |---|---|---|---|---|
-| EKS (nbo-dev-apps) | `agentopia-base.yaml` | `agentopia-bots.yaml` | ebs-gp3 | ALB |
+| EKS (nbo-dev-apps) | `agentopia-base.yaml` | `agentopia-bots.yaml` | ebs-gp3 | ALB | *(legacy/decommissioned)* |
 | k3s (server36) | `agentopia-base-k3s.yaml` | `agentopia-bots-k3s.yaml` | local-path | Traefik |

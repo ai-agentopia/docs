@@ -4,12 +4,12 @@ title: "bot-config-api (v2.0.0)"
 
 # bot-config-api (v2.0.0)
 
-LLM-powered bot provisioning service for Agentopia. Accepts free-text requirements via a web UI, generates structured bot config files (SOUL.md, USER.md, bot.yaml), and automatically deploys the bot through the full GitOps pipeline. Also serves as the A2A thread orchestrator (debate/bridge/epoch coordination via direct LLM calls through agentopia-llm-proxy).
+LLM-powered bot provisioning service for Agentopia. Accepts free-text requirements via the agentopia-ui frontend, generates structured bot config files (SOUL.md, USER.md, bot.yaml), and automatically deploys the bot through the full GitOps pipeline. Also serves as the A2A thread orchestrator (debate/bridge/epoch coordination via direct LLM calls through agentopia-llm-proxy).
 
 ## Architecture
 
 ```
-Web UI (http://<ip>/ui)
+agentopia-ui (separate React app)
       |
       | POST /api/v1/bots/deploy
       v
@@ -17,7 +17,7 @@ Web UI (http://<ip>/ui)
       |
       ├── Step 1: generate
       │     LLMGenerator → SOUL.md + USER.md + bot.yaml
-      │     (OpenRouter, google/gemini-2.0-flash-001, tool calling)
+      │     (openai-codex/gpt-5.1 via agentopia-llm-proxy, tool calling)
       │
       ├── Step 2: k8s_resources
       │     K8sService →
@@ -30,11 +30,11 @@ Web UI (http://<ip>/ui)
       ├── Step 4: git_push
       │     GitHubService → atomic 4-file commit (SOUL.md, USER.md, bot.yaml, agentopia-bots.yaml)
       │       GitHub: always stores telegramToken=REPLACE_ME (never commit real tokens)
-      │     K8sService → patch ApplicationSet element with REAL telegram token
-      │       ApplicationSet is standalone (not synced from Git) → token persists permanently
+      │     K8sService → create Application CRD in argocd namespace with REAL telegram token
+      │       Application CRD is created directly (not via ApplicationSet) → token persists permanently
       │             |
       │             v
-      │        ArgoCD detects ApplicationSet change (~30s)
+      │        ArgoCD detects Application CRD (~30s)
       │             |
       │             v
       │        Helm renders: agentopia-bot-token-<bot> Secret with REAL token
@@ -49,10 +49,10 @@ Web UI (http://<ip>/ui)
 UI telegram_token
       │
       ▼
-add_bot_to_applicationset(telegram_token=real_token)
+create_application_crd(telegram_token=real_token)
       │
-      ▼  (ApplicationSet element)
-ApplicationSet.spec.generators[0].list.elements[].telegramToken = "<real_token>"
+      ▼  (Application CRD in argocd namespace)
+Application.spec.source.helm.parameters[].telegramToken = "<real_token>"
       │
       ▼  (ArgoCD Helm sync)
 Helm chart → Secret/agentopia-bot-token-<bot>.data.token = base64(<real_token>)
@@ -64,7 +64,7 @@ Helm chart → Secret/agentopia-bot-token-<bot>.data.token = base64(<real_token>
 Bot connects to Telegram ✓
 ```
 
-**GitHub always stores `REPLACE_ME`** — the ApplicationSet K8s object holds the real token in-cluster only.
+**GitHub always stores `REPLACE_ME`** — the Application CRD in argocd namespace holds the real token in-cluster only.
 
 ## API Reference
 
@@ -105,7 +105,7 @@ Start an async bot provisioning job. Returns immediately with `deploy_id` for po
     {"name": "generate",      "label": "Generating bot config via LLM",                     "status": "pending"},
     {"name": "k8s_resources", "label": "Creating K8s resources (soul ConfigMap)",            "status": "pending"},
     {"name": "scope_pvc",     "label": "Ensuring shared memory PVC exists",                  "status": "pending"},
-    {"name": "git_push",      "label": "Committing to GitHub + ApplicationSet (with real token)", "status": "pending"},
+    {"name": "git_push",      "label": "Committing to GitHub + Application CRD (with real token)", "status": "pending"},
     {"name": "pod_monitor",   "label": "Waiting for pod to reach Running state",             "status": "pending"}
   ]
 }
@@ -146,7 +146,7 @@ Steps are skipped (not failed) when services are unavailable:
 
 ### GET /api/v1/bots/
 
-List all deployed bots from ApplicationSet, augmented with live K8s pod status.
+List all deployed bots from Application CRDs (label: agentopia/managed-by=bot-config-api), augmented with live K8s pod status.
 
 **Response:**
 ```json
@@ -604,7 +604,7 @@ Only the thread `initiator` can call conclude.
 
 Included in `charts/agentopia-base`. Gets:
 - **ServiceAccount** `bot-config-api` with RBAC (configmaps/secrets CRUD, pods/deployments read)
-- **Service** `LoadBalancer` port 80 → pod 8001 (exposes UI externally via AWS ELB)
+- **Service** `ClusterIP` port 80 → pod 8001 (exposed externally via Traefik ingress on k3s)
 - Env from Secrets: `bot-config-api-env` (OPENROUTER_API_KEY), `bot-config-api-github` (GITHUB_* vars)
 
 **Prerequisites:**
@@ -616,14 +616,13 @@ GITHUB_REPO_DEPLOY=ai-agentopia/agentopia-infra \
 GITHUB_BRANCH_DEPLOY=main \
 ./scripts/create-secrets.sh
 
-# Get UI URL after ArgoCD syncs
-kubectl get svc bot-config-api -n agentopia \
-  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+# Verify service is healthy after ArgoCD syncs
+curl http://bot-config-api.agentopia.svc.cluster.local/health
 ```
 
 **RBAC:**
 - `Role` in `agentopia` ns: ConfigMaps, Secrets, PVCs, Pods (CRUD)
-- `ClusterRole` + `ClusterRoleBinding`: `get`/`patch` on `argoproj.io/applicationsets` in `argocd` ns (required for patching the agentopia-bots ApplicationSet with real telegram tokens)
+- `ClusterRole` + `ClusterRoleBinding`: `get`/`create`/`patch`/`delete` on `argoproj.io/applications` in `argocd` ns (required for creating/managing Application CRDs in argocd namespace)
 
 **K8s resources created per bot (by bot-config-api, NOT by Helm):**
 | Resource | Name | Contents |
@@ -655,8 +654,8 @@ OPENROUTER_API_KEY=sk-or-v1-... \
 BOT_OUTPUT_DIR=$(git rev-parse --show-toplevel)/bots \
   .venv/bin/python src/main.py
 
-# Open UI
-open http://localhost:8001/ui
+# Verify server is running (root returns JSON API info)
+curl http://localhost:8001/health
 ```
 
 ---

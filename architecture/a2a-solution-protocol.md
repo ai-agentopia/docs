@@ -63,7 +63,7 @@ graph TB
     end
 
     subgraph Operator["Operator"]
-        OP["CTO / Operator<br/>(Telegram Client)"]
+        OP["CTO / Operator<br/>(agentopia-ui / Telegram)"]
     end
 
     subgraph K8s["Kubernetes Cluster"]
@@ -275,7 +275,7 @@ graph TB
     end
 
     subgraph Operator["Operator"]
-        OP["CTO / Operator<br/>(Telegram Client)"]
+        OP["CTO / Operator<br/>(agentopia-ui / Telegram)"]
     end
 
     subgraph K8s["Kubernetes Cluster"]
@@ -518,7 +518,7 @@ SA delivers architecture, contracts, issue packs, and verification plans first. 
 
 | Round | Scope | Status |
 |---|---|---|
-| **1** | Persistence migration (M1-M3) + execution surface hardening | **IN PROGRESS** |
+| **1** | Persistence migration (M1-M3) + execution surface hardening | **COMPLETE** |
 | 2 | Remaining persistence + structural refactor + Temporal infrastructure | Blocked on Round 1 |
 | 3 | Webhook pipeline + activity implementation | Blocked on Round 2 |
 | 4 | DeliveryWorkflow + LangGraph + actor pool | Blocked on Round 3 |

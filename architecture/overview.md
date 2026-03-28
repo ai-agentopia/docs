@@ -80,7 +80,7 @@ graph TB
 
     APP -->|"Communication<br/>(chat proxy)"| CHAT
     APP -->|"Workflow start<br/>(typed form)"| WFAPI
-    APP -->|"Admin<br/>(links to /ui)"| ADMIN
+    APP -->|"Admin UI"| ADMIN
 
     CHAT -->|"Proxy to gateway<br/>(general_chat)"| GW1 & GW2 & GW3
     GW1 & GW2 & GW3 -->|"LLM requests"| LLM
@@ -136,7 +136,7 @@ Communication and Workflow are not cosmetic tabs — they hit different API surf
 - **Bot activation**: 4 gates (SOUL, binding, MCP, tools). Deployment validation. Only ACTIVE bots eligible for delivery routing
 - **Telegram integration**: Primary interaction surface today. P1 target: web app becomes primary, Telegram becomes optional secondary.
 - **Review fallback**: 60s grace window + GitHub verification. One-shot resolution guard. Per-round reset for rework loop
-- **Admin UI (`/ui`)**: Exists. Bot CRUD, config, deploy, governance.
+- **Admin UI**: agentopia-ui (separate React app, deployed independently). Bot CRUD, config, deploy, governance.
 
 ### What is P1 target (not yet built)
 

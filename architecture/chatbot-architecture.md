@@ -13,7 +13,7 @@ title: "Agentopia Chatbot Platform — Architecture & Roadmap"
 
 ## 1. Executive Summary
 
-Agentopia is a self-hosted AI chatbot platform that enables organizations to deploy multiple specialized AI bots with shared knowledge, long-term memory, and enterprise-grade infrastructure. The platform runs on Kubernetes (EKS) with full GitOps automation via ArgoCD.
+Agentopia is a self-hosted AI chatbot platform that enables organizations to deploy multiple specialized AI bots with shared knowledge, long-term memory, and enterprise-grade infrastructure. The platform runs on Kubernetes (k3s) with full GitOps automation via ArgoCD.
 
 **Current state:** Production-ready single-user multi-bot platform with Telegram integration, automated bot provisioning via web UI, and persistent semantic memory.
 
@@ -25,7 +25,7 @@ Agentopia is a self-hosted AI chatbot platform that enables organizations to dep
 - **Shared knowledge across bots:** All bots in a scope share the same memory store and knowledge base
 - **Memory survives context compaction:** 3-layer memory architecture ensures no context loss
 - **Extensible without forking:** Plugin SDK + LLM Proxy pattern enables 90%+ features without modifying gateway source
-- **GitOps-native:** Every change tracked in Git, deployed via ArgoCD ApplicationSet
+- **GitOps-native:** Every change tracked in Git, deployed via ArgoCD Application CRD
 
 ---
 
@@ -38,15 +38,15 @@ Agentopia is a self-hosted AI chatbot platform that enables organizations to dep
                                     │     bot-config-api          │
                                     │     (FastAPI :8001)         │
                                     │                             │
-                                    │  Web UI → LLM Generator    │
+                                    │  agentopia-ui → LLM Gen.   │
                                     │  → K8s Resources           │
                                     │  → Git Push                │
-                                    │  → ApplicationSet Patch    │
+                                    │  → Application CRD Patch   │
                                     │  → Pod Monitor             │
                                     └──────────┬──────────────────┘
                                                │ creates
                                                ▼
-┌──────────────────────────── EKS Cluster (agentopia namespace) ────────────────────────────┐
+┌──────────────────────────── k3s Cluster (agentopia namespace) ────────────────────────────┐
 │                                                                                            │
 │  ┌─────────────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐   │
 │  │  agentopia-gateway      │  │  agentopia-gateway      │  │  agentopia-gateway      │   │
@@ -70,9 +70,9 @@ Agentopia is a self-hosted AI chatbot platform that enables organizations to dep
 │  └────────────────┘  └─────────────────┘  └──────────────────┘                           │
 │                                                                                            │
 │  ┌──────────────────────────────┐  ┌────────────────────────────────────────────────┐    │
-│  │  agentopia-llm-proxy  :18789 │  │  AWS EBS (ebs-gp3 StorageClass)                │    │
+│  │  agentopia-llm-proxy  :18789 │  │  local-path StorageClass (k3s)                 │    │
 │  │  (Rust, OpenAI-compat API)   │  │  Per-bot state PVC (RWO, /openclaw-state/)      │    │
-│  │  Routes: Codex OAuth →       │  │  Scope-based sharing: NOT active               │    │
+│  │  Routes: Codex OAuth →       │  │  Scope-based sharing PVC: disabled             │    │
 │  │  openai-codex/gpt-5.1        │  └────────────────────────────────────────────────┘    │
 │  └──────────────────────────────┘                                                         │
 │                                                                                            │
@@ -92,7 +92,7 @@ Agentopia is a self-hosted AI chatbot platform that enables organizations to dep
 | `agentopia-llm-proxy` | 18789 (K8s svc) | Rust (Axum) | OpenAI-compatible proxy → Codex OAuth (gpt-5.1); auth via `AGENTOPIA_RELAY_TOKEN` | Helm (`agentopia-base`) |
 | `Qdrant` | 6333 | Qdrant v1.16.1 (StatefulSet) | Vector database for semantic memory | Helm (`agentopia-base`) |
 | `Neo4j` | 7474/7687 | Neo4j 5.26 (StatefulSet) | Graph database for entity relations | Helm (`agentopia-base`) |
-| `Vault` | 8200 | HashiCorp Vault (dev mode) | API key store (ANTHROPIC_API_KEY, OPENROUTER_API_KEY, AGENTOPIA_GATEWAY_TOKEN) | Helm (`agentopia-base`) |
+| `Vault` | 8200 | HashiCorp Vault (file storage, auto-unseal sidecar) | API key store (ANTHROPIC_API_KEY, OPENROUTER_API_KEY, AGENTOPIA_GATEWAY_TOKEN) | Helm (`agentopia-base`) |
 
 ### 2.3 Gateway Architecture (Closed Source, Extensible)
 
@@ -120,7 +120,7 @@ The openclaw-gateway is an npm package (`openclaw@2026.2.26`) that runs as a Nod
 ### 2.4 Bot Provisioning Pipeline (5-Step Automated Deploy)
 
 ```
-Web UI (http://<ip>/ui)
+agentopia-ui (separate React app, http://<ip>/)
       │
       │ POST /api/v1/bots/deploy
       ▼
@@ -142,11 +142,11 @@ Web UI (http://<ip>/ui)
       ├── Step 4: git_push
       │     GitHubService → atomic 4-file commit:
       │       bots/<bot>/SOUL.md, USER.md, bot.yaml, argocd/agentopia-bots.yaml
-      │     K8sService → patch ApplicationSet with REAL telegram token
+      │     K8sService → patch Application CRD with REAL telegram token
       │       (GitHub stores "REPLACE_ME" — real token only in K8s)
       │           │
       │           ▼
-      │      ArgoCD detects ApplicationSet change (~30s)
+      │      ArgoCD detects Application CRD change (~30s)
       │           │
       │           ▼
       │      Helm renders all K8s resources for the new bot
@@ -161,10 +161,10 @@ Web UI (http://<ip>/ui)
 UI telegram_token
       │
       ▼
-bot-config-api.add_bot_to_applicationset(telegram_token=real)
+bot-config-api.add_bot_to_application_crd(telegram_token=real)
       │
-      ▼  (ApplicationSet element — K8s object, standalone, NOT synced from Git)
-ApplicationSet.spec.generators[0].list.elements[].telegramToken = "<real_token>"
+      ▼  (Application CRD — K8s object, standalone, NOT synced from Git)
+Application.spec.source.helm.parameters[].telegramToken = "<real_token>"
       │
       ▼  (ArgoCD Helm sync)
 Helm chart → Secret/agentopia-bot-token-<bot>.data.token = base64(<real_token>)
@@ -176,7 +176,7 @@ Helm chart → Secret/agentopia-bot-token-<bot>.data.token = base64(<real_token>
 Bot connects to Telegram
 ```
 
-**Security principle:** GitHub **always** stores `REPLACE_ME` — the real token exists only in the K8s ApplicationSet object (in-cluster). ArgoCD `ignoreDifferences` on Secret prevents `selfHeal` from reverting the patched value.
+**Security principle:** GitHub **always** stores `REPLACE_ME` — the real token exists only in the K8s Application CRD object (in-cluster). ArgoCD `ignoreDifferences` on Secret prevents `selfHeal` from reverting the patched value.
 
 ### 2.6 K8s Resources Per Bot
 
@@ -184,9 +184,9 @@ Bot connects to Telegram
 |----------|-------------|------------|-----------|
 | ConfigMap | `agentopia-soul-<bot>` | bot-config-api (step 2) | Recreated on redeploy |
 | Secret | `agentopia-gateway-env-<bot>` | bot-config-api (step 2) | Contains `AGENTOPIA_GATEWAY_TOKEN` + `AGENTOPIA_RELAY_TOKEN` |
-| Secret | `agentopia-bot-token-<bot>` | Helm (ArgoCD sync) | Real token from ApplicationSet |
-| PVC | `agentopia-state-<bot>` | Helm (`resource-policy: keep`) | Persists across redeploys (ebs-gp3, RWO) |
-| PVC | `agentopia-shared-<scope>` | bot-config-api (step 3) | Shared across bots in scope (currently disabled — no EFS configured) |
+| Secret | `agentopia-bot-token-<bot>` | Helm (ArgoCD sync) | Real token from Application CRD |
+| PVC | `agentopia-state-<bot>` | Helm (`resource-policy: keep`) | Persists across redeploys (local-path, RWO) |
+| PVC | `agentopia-shared-<scope>` | bot-config-api (step 3) | Shared across bots in scope (currently disabled — shared PVC not configured) |
 | Deployment | `agentopia-<bot>` | Helm (ArgoCD sync) | Managed by ArgoCD |
 | ConfigMap | `agentopia-config-<bot>` | Helm (ArgoCD sync) | openclaw.json with Helm values |
 
@@ -210,7 +210,7 @@ Bot connects to Telegram
 │  │   (captureOnFailure: true)                        │
 │  └── Pipeline: messages → OpenRouter LLM → Qdrant   │
 │                                                      │
-│  [ON-DEMAND] shared-memory/ (scope PVC — NOT active)  │
+│  [ON-DEMAND] shared-memory/ (shared PVC — disabled)  │
 │  ├── USER.md, architecture.md, decisions.md          │
 │  ├── groups/{chatId}.md, {chatId}_{topicId}.md       │
 │  └── Accessed via memory_search() tool call          │
@@ -222,7 +222,7 @@ Bot connects to Telegram
 └──────────────────────────────────────────────────────┘
 ```
 
-**Scope-based isolation (K8s — NOT currently active, all bots are isolated):**
+**Scope-based isolation (K8s — not currently active, all bots are isolated):**
 
 | Scenario | Shared PVC | mem0 userId | Isolation |
 |----------|-----------|-------------|-----------|
@@ -282,13 +282,13 @@ GitHub: ai-agentopia/agentopia-infra  (infra only)
       │
       ├── charts/agentopia-base/    → ArgoCD App: agentopia-base (sync-wave -1)
       │     Infrastructure: mem0-api, Qdrant, Neo4j, Vault, agentopia-llm-proxy, bot-config-api
-      │     Storage: ebs-gp3 StorageClass (scope PVC disabled — efs.fileSystemId not set)
+      │     Storage: local-path StorageClass (scope shared PVC disabled)
       │
-      ├── charts/agentopia-bot/     → ArgoCD ApplicationSet: agentopia-bots
+      ├── charts/agentopia-bot/     → ArgoCD Application CRD: one per bot
       │     Per-bot: gateway pod, config, secrets, PVC
       │
-      └── argocd/agentopia-bots.yaml → ApplicationSet definition (standalone K8s object)
-            elements: [] (bots added by bot-config-api, not manually)
+      └── argocd/agentopia-bots.yaml → Application CRD definition (standalone K8s object)
+            bots added by bot-config-api, not manually
 
 GitHub: ai-agentopia/agentopia-protocol  (application code)
       │
@@ -296,12 +296,12 @@ GitHub: ai-agentopia/agentopia-protocol  (application code)
             → built by build-images.yml → pushed to ghcr.io/ai-agentopia/
 ```
 
-**ApplicationSet management rules:**
+**Application CRD management rules:**
 - `agentopia-bots.yaml` in git = source of truth for structure
-- ApplicationSet K8s object = standalone (not synced from git by ArgoCD)
-- bot-config-api patches K8s object directly (adds elements with real tokens)
+- Application CRD K8s object = standalone (not synced from git by ArgoCD)
+- bot-config-api patches K8s object directly (creates/updates Application CRD with real tokens)
 - `argocd/agentopia-bots.yaml` in git tracks bot additions for auditability
-- **Never** patch K8s ApplicationSet manually without updating git file
+- **Never** patch K8s Application CRD manually without updating git file
 
 ### 2.10 Operational Health Checks
 
@@ -468,7 +468,7 @@ This pattern covers audit logging, knowledge base RAG, content filtering, metric
 |---|------|----------|--------|
 | 1 | Bot update/redeploy (SOUL.md changes) | bot-config-api endpoint + UI | 3-5 days |
 | 2 | Bot pause/resume | Scale deployment to 0/1 | 1-2 days |
-| 3 | Bot deletion with cleanup | Delete ApplicationSet element + K8s resources | 2-3 days |
+| 3 | Bot deletion with cleanup | Delete Application CRD + K8s resources | 2-3 days |
 | 4 | Bot health monitoring UI | Real-time pod status + Telegram connection | 3-5 days |
 
 **GitHub:** [#12](https://github.com/ai-agentopia/agentopia-infra/issues/12)
@@ -580,9 +580,9 @@ This pattern covers audit logging, knowledge base RAG, content filtering, metric
 
 | # | Issue | Description | Effort | Fork? |
 |---|-------|-------------|--------|-------|
-| #36 | Per-bot LLM token tracking | LiteLLM metrics → Prometheus → per-bot cost | 3-5 days | No |
+| #36 | Per-bot LLM token tracking | agentopia-llm-proxy metrics → Prometheus → per-bot cost | 3-5 days | No |
 | #37 | Grafana dashboards | Cluster health + per-bot cost breakdown | 2-3 days | No |
-| #38 | Smart model routing & semantic cache | LiteLLM routing rules + Redis cache | 3-5 days | No |
+| #38 | Smart model routing & semantic cache | agentopia-llm-proxy routing rules + Redis cache | 3-5 days | No |
 
 > **Dependency:** All F5 items require **F9 (LLM Proxy)** to be deployed first. Without proxy, no LLM traffic visibility.
 
@@ -715,10 +715,10 @@ Each sprint builds on the previous one. Issues cannot start until their dependen
 
 | Sprint | Label | Epics | Issues | Why This Order |
 |--------|-------|-------|--------|----------------|
-| **Sprint 1** | `sprint:1` | **P0** Security, **F9** LLM Proxy | #11, #47, #48-51 | Foundation layer. P0 secures the platform (no auth = no production). F9 deploys LiteLLM proxy — prerequisite for cost tracking, audit, and model routing in later sprints. |
+| **Sprint 1** | `sprint:1` | **P0** Security, **F9** LLM Proxy | #11, #47, #48-51 | Foundation layer. P0 secures the platform (no auth = no production). F9 deployed custom Rust LLM proxy (agentopia-llm-proxy) — prerequisite for cost tracking, audit, and model routing in later sprints. |
 | **Sprint 2** | `sprint:2` | **P1** Bot Lifecycle, **F3** Multi-Channel | #12, #18, #30-32 | Complete the CRUD cycle: currently can create bots, now add update/pause/delete. F3 is config-only (gateway supports 15+ channels natively), high business value, very low effort. |
 | **Sprint 3** | `sprint:3` | **F2** MCP Tools, **F4** Knowledge Base | #17, #219, #27-29, #19, #33-35 | Make bots smarter. F2 adds external tools (GitHub, DB) via `mcp-bridge` Plugin SDK extension (#219). F4 adds document/code knowledge base (new microservice + Plugin SDK RAG injection). Both are independent and can parallelize. |
-| **Sprint 4** | `sprint:4` | **P2** Observability, **F5** Analytics | #13, #20, #36-38 | Full visibility. P2 deploys Prometheus+Grafana for infra monitoring. F5 builds on F9 (Sprint 1) for LLM cost dashboards. #38 (model routing) uses LiteLLM routing rules from Sprint 1. |
+| **Sprint 4** | `sprint:4` | **P2** Observability, **F5** Analytics | #13, #20, #36-38 | Full visibility. P2 deploys Prometheus+Grafana for infra monitoring. F5 builds on F9 (Sprint 1) for LLM cost dashboards. #38 (model routing) extends agentopia-llm-proxy routing rules. |
 | **Sprint 5** | `sprint:5` | **F6** Governance, **P4** DX | #21, #39-41, #15 | Enterprise compliance. F6 adds audit logs (Plugin SDK), content filtering (Plugin SDK + LLM Proxy from Sprint 1), HITL approval. P4 documents Plugin SDK and creates dev tooling for ecosystem growth. |
 | **Sprint 6** | `sprint:6` | **F1** Multi-Agent, **P3** Multi-tenancy | #16, #24-26, #14 | Advanced features. F1 requires stable platform (Sprints 1-5) for agent collaboration. P3 adds namespace isolation — prerequisite for SaaS in Sprint 7. |
 | **Sprint 7** | `sprint:7` | **F7** Marketplace, **F8** SaaS | #22, #42-43, #23, #44-46 | Monetization layer. F7 builds template gallery (needs P4 from Sprint 5). F8 adds billing + onboarding (needs P3 from Sprint 6, F9+F5 for usage metering). |
@@ -759,14 +759,14 @@ The gateway is an npm package (`openclaw@2026.2.26`). Forking means maintaining 
 |----------|----------|----------|
 | **Config-only** (openclaw.json, Helm) | ~35% | Multi-channel (F3), security hardening (P0), memory scope |
 | **Plugin SDK** (custom extensions) | ~30% | Audit logging (F6/#39), knowledge base RAG (F4), metrics, content filter (input) |
-| **LLM Proxy** (LiteLLM) | ~20% | Cost tracking (F5), model routing (#38), semantic cache, output filtering (#40), budget alerts |
+| **LLM Proxy** (agentopia-llm-proxy, Rust) | ~20% | Cost tracking (F5), model routing (#38), semantic cache, output filtering (#40), budget alerts |
 | **New microservices** | ~8% | bot-config-api (done), knowledge-api (F4), orchestrator (F1), tenant-api (F8) |
 | **Possible fork** | ~2% | Output content filter (#40 if proxy insufficient), HITL blocking approval (#41) |
 
 ### Alternatives to Forking for Edge Cases
 
 **#40 Content filtering (output):**
-1. **LLM Proxy output hook** (preferred) — LiteLLM supports custom callbacks on response
+1. **LLM Proxy output hook** (preferred) — agentopia-llm-proxy supports custom middleware on response
 2. **Post-processing plugin** — if Plugin SDK adds `before_response_send` event in future
 3. **Fork** — last resort if neither works
 
@@ -779,23 +779,27 @@ The gateway is an npm package (`openclaw@2026.2.26`). Forking means maintaining 
 
 ## 8. Technology Decisions
 
-### Why LiteLLM for LLM Proxy?
+### Why Custom Rust Proxy (agentopia-llm-proxy) instead of LiteLLM?
 
-| Criteria | LiteLLM | Custom Proxy | Direct Integration |
-|----------|---------|-------------|-------------------|
-| OpenAI-compatible API | Yes | Build from scratch | N/A |
-| Per-key cost tracking | Built-in | Custom | Not possible |
-| 100+ LLM providers | Yes | Manual | N/A |
-| Semantic caching | Built-in (Redis) | Custom | Not possible |
-| Rate limiting | Built-in | Custom | Not possible |
-| K8s deployment | Helm chart available | Custom | N/A |
-| Maintenance burden | Low (OSS community) | High | Zero |
+> **(historical context)** LiteLLM was the original plan. It was replaced with a custom Rust proxy for the reasons below.
 
-### Why ArgoCD ApplicationSet (not Flux, not raw ArgoCD)?
+| Criteria | LiteLLM | agentopia-llm-proxy (Rust, implemented) |
+|----------|---------|-----------------------------------------|
+| OpenAI-compatible API | Yes | Yes (Axum, ~200 lines) |
+| Codex OAuth token format | Incompatible (requires x-api-key) | Native support |
+| Per-key cost tracking | Built-in | Planned (Codex API returns 0 tokens — limitation) |
+| 100+ LLM providers | Yes | Manual (providers added as needed) |
+| Semantic caching | Built-in (Redis) | Planned |
+| Rate limiting | Built-in | Planned |
+| Maintenance burden | Low (OSS community) | Low (simple, self-owned) |
 
-- **ApplicationSet:** One template → N bots. Bot additions are element patches, not new YAML files.
-- **ArgoCD vs Flux:** ArgoCD has ApplicationSet, better UI, stronger K8s adoption (CNCF graduated).
-- **Standalone ApplicationSet:** Not synced from git → allows runtime token patching without git conflicts.
+**Decision rationale:** LiteLLM is incompatible with the Codex OAuth enterprise auth flow. The custom Rust proxy handles Codex OAuth token injection natively. Source: `agentopia-protocol/llm-proxy/`.
+
+### Why ArgoCD Application CRD (not Flux, not ApplicationSet)?
+
+- **Application CRD:** One ArgoCD Application per bot. Bot additions create new Application objects, not patches to a shared list.
+- **ArgoCD vs Flux:** ArgoCD has better UI, stronger K8s adoption (CNCF graduated).
+- **Standalone Application CRD:** Not synced from git → allows runtime token patching without git conflicts.
 
 ### Why Plugin SDK over Gateway Fork?
 
@@ -808,17 +812,18 @@ The gateway is an npm package (`openclaw@2026.2.26`). Forking means maintaining 
 
 ## 9. Current Production Topology
 
-### EKS Cluster Details
+### k3s Cluster Details
 
 | Property | Value |
 |----------|-------|
-| Cluster | `arn:aws:eks:eu-central-1:198698840116:cluster/nbo-dev-apps` |
+| Cluster | k3s cluster (server36, namespace: agentopia) |
 | Namespace | `agentopia` (only namespace we operate in) |
 | Node count | 7 schedulable nodes |
-| Storage | EBS gp3 (per-bot state PVC, RWO); scope shared-memory PVC not active |
+| Storage | local-path (per-bot state PVC, RWO); scope shared PVC disabled |
+| Ingress | Traefik ingress (k3s default) |
 | Images | `ghcr.io/ai-agentopia/agentopia-gateway`, `mem0-api`, `bot-config-api`, `agentopia-llm-proxy` |
 | CI/CD | GitHub Actions in `agentopia-protocol` repo → build + push on merge to main |
-| GitOps | ArgoCD (apps: `agentopia-base`, `agentopia-bots` ApplicationSet) |
+| GitOps | ArgoCD (apps: `agentopia-base`, per-bot Application CRDs) |
 
 ### Resource Budget Per Bot
 
@@ -839,7 +844,7 @@ The gateway is an npm package (`openclaw@2026.2.26`). Forking means maintaining 
 | [Architecture-multiple-bot.md](Architecture-multiple-bot.md) | Detailed multi-bot deployment architecture (memory layers, file layout, on-premise setup) |
 | [bot-config-api.md](bot-config-api.md) | bot-config-api v2.0.0 API reference, deploy pipeline, token flow |
 | [mem0-api.md](mem0-api.md) | mem0-api service documentation |
-| [openclaw-k8s.md](openclaw-k8s.md) | K8s migration guide (from on-premise to EKS) |
+| [openclaw-k8s.md](openclaw-k8s.md) | K8s migration guide (from on-premise to k3s/EKS) |
 
 ### GitHub Issue Tracking (by Sprint)
 

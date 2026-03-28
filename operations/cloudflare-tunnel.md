@@ -38,7 +38,7 @@ Current routes (defined in ConfigMap `cloudflared-config`):
 
 | Hostname | Service | Purpose |
 |---|---|---|
-| `agentopia.creodeck.space` | `http://bot-config-api.agentopia.svc.cluster.local:80` | Bot creation UI + API |
+| `agentopia.creodeck.space` | `http://bot-config-api.agentopia.svc.cluster.local:80` | Bot Config API (API-only) |
 | (catch-all) | `http_status:404` | Reject unknown hostnames |
 
 ## How to Reproduce (from scratch)
@@ -167,8 +167,8 @@ In Cloudflare Dashboard (dash.cloudflare.com) → `creodeck.space` → DNS → A
 curl https://agentopia.creodeck.space/health
 # → {"status":"ok","version":"2.0.0"}
 
-# UI
-open https://agentopia.creodeck.space/ui
+# Health check (alternate)
+curl https://agentopia.creodeck.space/health
 
 # Check tunnel connections (should show 4 registered)
 kubectl logs deploy/cloudflared -n kube-system --tail=10

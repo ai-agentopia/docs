@@ -24,7 +24,7 @@ Each environment has:
 - `root.yaml` — App-of-Apps bootstrap
 - `base.yaml` — Base infrastructure (postgres, redis, neo4j, vault, qdrant, bot-config-api, mem0-api, llm-proxy)
 - `ui.yaml` — Frontend
-- `bots.yaml` — ApplicationSet for per-bot deployments
+- `bots.yaml` — Application CRDs for per-bot deployments (created directly by bot-config-api)
 
 All apps target their environment's infra branch (`dev` or `uat`).
 

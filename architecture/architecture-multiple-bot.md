@@ -91,7 +91,7 @@ Agentopia is a self-hosted AI agent gateway that routes Telegram messages to mul
                          (via agentopia-llm-proxy, for gpt-5.x models)
 ```
 
-> **K8s deployment:** In Kubernetes, each bot runs as a separate pod with its own EBS PVC (StorageClass `ebs-gp3`, RWO). Scope-based shared-memory PVCs are currently disabled (no `efs.fileSystemId` configured). `bot-config-api` is deployed as a K8s pod and is the only way to generate bot config files in K8s (it calls Codex via `agentopia-llm-proxy`, no local CLI needed). See `docs/openclaw-k8s.md` for K8s architecture.
+> **K8s deployment:** In Kubernetes, each bot runs as a separate pod with its own local-path PVC (StorageClass `local-path`, RWO). Scope-based shared-memory PVCs are currently disabled (EFS shared storage removed/not configured). `bot-config-api` is deployed as a K8s pod and is the only way to generate bot config files in K8s (it calls Codex via `agentopia-llm-proxy`, no local CLI needed). See `docs/openclaw-k8s.md` for K8s architecture.
 
 ---
 
@@ -709,7 +709,7 @@ SOUL.md default         ← if neither file exists
 
 ### Scope-Based Sharing (Design — K8s only, NOT currently active)
 
-> **Note:** Scope-based sharing is currently disabled. No `efs.fileSystemId` is set in values.yaml. All bots are isolated — each bot has its own EBS PVC (`ebs-gp3`, RWO) and its own mem0 userId. The scope PVC design below describes the intended architecture for when sharing is re-enabled.
+> **Note:** Scope-based sharing is currently disabled. EFS shared storage has been removed. All bots are isolated — each bot has its own local-path PVC (`local-path`, RWO) and its own mem0 userId. The scope PVC design below describes the intended architecture for when sharing is re-enabled.
 
 In K8s deployments, shared-memory would use **named scopes** as the isolation boundary:
 

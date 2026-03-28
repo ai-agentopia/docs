@@ -56,7 +56,7 @@ And additionally: `/hooks/agent` is always **async** — gateway returns HTTP 20
 - Gateway binary untouched (upstream, no fork)
 - Telegram polling via gateway
 - mem0 integration unchanged
-- File memory unchanged (EBS PVC)
+- File memory unchanged (local-path PVC)
 - ArgoCD GitOps unchanged
 
 ### Synchronous Relay Solution
@@ -147,7 +147,7 @@ NOTE: debate_turn / bridge_notify / epoch_summary LLM calls go via agentopia-llm
 
                      ▼
 ┌────────────────────────────────────────────────────────────┐
-│          Shared Memory (EBS PVC, per bot-config-api pod)    │
+│          Shared Memory (local-path PVC, per bot-config-api pod)    │
 │  /openclaw-state/shared-memory/threads/{thread_id}/         │
 │    ├── meta.json              (state + lease lock)          │
 │    ├── turn-0001.json         (write-once, status+response) │
@@ -682,7 +682,7 @@ Bot A ◄───────────────────────�
   │                                            │
   │  MCP (agent → tools)                       │  MCP (agent → tools)
   ├──► mem0-api (memory)                       ├──► mem0-api (memory)
-  ├──► file system (EBS PVC)                   ├──► file system (EBS PVC)
+  ├──► file system (local-path PVC)             ├──► file system (local-path PVC)
   └──► web search                              └──► web search
 ```
 
