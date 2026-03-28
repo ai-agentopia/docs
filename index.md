@@ -1,43 +1,52 @@
 ---
-title: "Agentopia Documentation Index"
+title: "Introduction"
+description: "Agentopia — Autonomous multi-bot delivery platform"
 ---
 
-# Agentopia Documentation Index
+# Agentopia
 
-## Architecture
-- [System Overview](architecture/overview.md) — Architecture overview and component map
-- [Chatbot Architecture](architecture/chatbot-architecture.md) — Master architecture + roadmap
-- [Multiple Bot Architecture](architecture/architecture-multiple-bot.md) — Memory 3-layer design
-- [Governed PR Review Workflow](architecture/governed-pr-review-workflow.md) — Product architecture for GitHub-triggered agentic code review
-- [A2A Full Design](architecture/a2a-full-design.md) — Agent-to-Agent protocol design
-- [A2A Solution Protocol](architecture/a2a-solution-protocol.md) — Protocol implementation details
-- [A2A Improvement Plan](architecture/a2a-improvement-plan.md) — Planned improvements
-- [A2A Comparison](architecture/a2a-comparison.md) — BeeAI vs Agentopia comparison
-- [P0.5 Deterministic Delivery](architecture/p0.5-deterministic-delivery-start.md) — Delivery start front door
-- [P1 Execution Authorization](architecture/p1-execution-authorization.md) — Execution auth design
+Agentopia is an autonomous multi-bot platform that orchestrates AI agents for software delivery. Each bot is a specialized agent — code reviewer, DevOps engineer, QA analyst, solution architect — collaborating through the A2A (Agent-to-Agent) protocol.
 
-## Architecture Decision Records
-- [ADR-005: Relay Deprecation](adrs/005-relay-deprecation-timeline.md)
-- [ADR-007: Integrations Abstraction](adrs/007-integrations-abstraction.md)
+## What Agentopia does
 
-## Milestones
-- [M6.2: Deterministic Delivery](milestones/m6.2-deterministic-delivery.md) — Trello planning projection (refs: milestone #30, issues #275, #276)
+- **Bot provisioning** — generate and deploy specialized AI bots from natural language requirements
+- **Workflow orchestration** — Temporal-based delivery workflows with deterministic state transitions
+- **Governed code review** — bot-driven PR review with risk triage, policy enforcement, and remediation
+- **Planning projection** — one-way sync to Trello/planning boards for stakeholder visibility
+- **Memory architecture** — semantic (Qdrant + Neo4j) and file-based memory per bot
 
-## Runbooks
-- [A2A Operations](runbooks/a2a-operations.md) — A2A protocol operational runbook
+## Platform components
 
-## Operations
-- [CI/CD Contract](operations/cicd-contract.md) — Branch workflows, image tags, Image Updater policy
-- [Environment Contract](operations/environment-contract.md) — DEV/UAT namespace, GitOps targeting
-- [Documentation Governance](operations/documentation-governance.md) — Where docs live, rules, workflow
-- [Cloudflare Tunnel](operations/cloudflare-tunnel.md) — Tunnel setup for dev/uat domains
-- [Environment Migration](operations/environment-migration.md) — Namespace migration guide
-- [UAT Migration](operations/migration-uat.md) — UAT setup from ai-agentopia org
+| Component | Purpose |
+|---|---|
+| **bot-config-api** | Control plane — bot generation, deployment, workflow coordination |
+| **agentopia-gateway** | Bot runtime — LLM orchestration, Telegram/channel integration |
+| **agentopia-llm-proxy** | LLM routing — Codex OAuth, provider abstraction (Rust) |
+| **mem0-api** | Memory service — semantic search, entity graph |
+| **agentopia-ui** | Web interface — bot management, workflow monitoring |
 
-## Product
-- [Bot Config API](product/bot-config-api.md) — API reference
-- [mem0 Service](product/mem0-api.md) — Memory service docs
-- [UI/UX Redesign Milestone](product/uiux-redesign-milestone.md) — Mission Console redesign
-- [UI/UX Dev Handoff](product/uiux-dev-handoff.md) — Implementation brief
-- [UI/UX Layout Spec](product/uiux-layout-spec.md) — Figma-ready layout
-- [UI/UX Issues](product/uiux-issues.md) — Issue-ready tickets
+## Repositories
+
+| Repo | Contents |
+|---|---|
+| [agentopia-protocol](https://github.com/ai-agentopia/agentopia-protocol) | Backend services: bot-config-api, gateway, mem0-api, llm-proxy |
+| [agentopia-infra](https://github.com/ai-agentopia/agentopia-infra) | Helm charts, ArgoCD manifests, deployment scripts |
+| [agentopia-ui](https://github.com/ai-agentopia/agentopia-ui) | React web frontend |
+| [agentopia-core](https://github.com/ai-agentopia/agentopia-core) | Gateway runtime (OpenClaw fork) |
+
+## Quick links
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="sitemap" href="/architecture/overview">
+    System components, data flow, and deployment topology
+  </Card>
+  <Card title="A2A Protocol" icon="arrows-rotate" href="/architecture/a2a-full-design">
+    Agent-to-Agent communication design
+  </Card>
+  <Card title="Bot Config API" icon="robot" href="/product/bot-config-api">
+    API reference for bot provisioning and management
+  </Card>
+  <Card title="Fresh Deploy Runbook" icon="rocket" href="/runbooks/fresh-deploy">
+    Zero-to-deployed guide for new clusters
+  </Card>
+</CardGroup>
