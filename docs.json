@@ -41,7 +41,8 @@
             "group": "Governed Code Review",
             "pages": [
               "architecture/governed-pr-review-workflow",
-              "architecture/reviewer-remediation"
+              "architecture/reviewer-remediation",
+              "architecture/reviewer-coexistence"
             ]
           },
           {
@@ -68,6 +69,12 @@
             "pages": [
               "product/bot-config-api",
               "product/mem0-api"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "product/multi-provider-model-selection"
             ]
           },
           {
