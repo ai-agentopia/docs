@@ -256,71 +256,51 @@ Returns the full audit trail: fix commands, closure events, timestamps.
 
 ---
 
-## 6. #285 Completion Callback — E2E Proven
+## 6. Review Completion — Current Status
 
-### How It Works
+### Current Stable Path (as of 2026-03-29)
 
 1. Reviewer bot posts GitHub PR review via `gov_create_pr_review`
-2. Bot calls `gov_report_review_completion` with structured findings
-3. Control plane persists findings into `review_findings` table
-4. Run status updated to COMPLETED with verdict + finding_count
-5. Review artifact (GitHub review_id) persisted in audit trail
+2. A2A sidecar marks task as completed
+3. Review run status remains DISPATCHED (no automatic completion callback)
 
-### E2E Evidence (2026-03-28)
+### What Works
 
-| Item | Value |
-|------|-------|
-| Run ID | `19738df3-6857-4618-b334-91d173fe637a` |
-| PR | #104 |
-| Bot | `code-review` |
-| Verdict | REQUEST_CHANGES |
-| Findings persisted | 10 (4 critical, 3 high, 3 medium) |
-| GitHub review ID | `4025697608` |
+- Bot reliably posts GitHub reviews (APPROVE / REQUEST_CHANGES)
+- Reviews are visible on GitHub PR
+- Review runs are created and tracked in the database
 
-### Tool Bridge
+### What Is Partial / Deferred
 
-- **Tool**: `gov_report_review_completion`
-- **Endpoint**: `POST /api/v1/governance/qa/report-review-completion`
-- **Registered in**: reviewer role contract (QA tools)
+| Capability | Status | Reason |
+|------------|--------|--------|
+| Structured finding persistence | **Deferred** | Requires completion callback or atomic tool — both blocked by platform issues |
+| Run status → COMPLETED | **Partial** | Watchdog can recover stale DISPATCHED runs, but no real-time completion signal |
+| Finding-level audit trail | **Deferred** | Depends on findings being persisted first |
+
+### Experimental Tools (not active)
+
+Two experimental tools exist in the codebase but are **not part of the active feature path**:
+
+- `gov_report_review_completion` — completion callback tool. Works when bot calls it, but A2A sidecar marks task complete before bot can make a second tool call.
+- `gov_submit_structured_pr_review` — atomic review + persistence tool. Backend endpoint works, but the OpenClaw gateway SDK does not expose newly registered tools to the LLM function set. Bot cannot see this tool at runtime.
+
+Both are deferred to **milestone #32** ([Platform] Governance Tool Contract, Exposure, and Runtime Introspection).
 
 ---
 
-## 7. Atomic Review Boundary Correction
+## 7. Platform Blocker — Tool Exposure (#32)
 
 ### Problem
-The original two-step flow (`gov_create_pr_review` → `gov_report_review_completion`) was structurally unreliable. The reviewer bot's A2A task completed after the first tool call, leaving the second call (findings persistence) unexecuted. This is a single-bot runtime completion semantics issue, not a multi-bot problem.
+The OpenClaw gateway SDK registers tools via `api.registerTool()`, but newly added tools are not reliably exposed to the LLM's function set. The bot explicitly reported: *"gov_submit_structured_pr_review is not available in my function set"* despite the gateway logging 29 registered tools.
 
-### Solution: `gov_submit_structured_pr_review`
-A new atomic governance tool that posts the GitHub review AND persists structured findings in one tool execution path:
+### Impact
+- Cannot introduce new governance tools to bots without platform-layer investigation
+- Only tools that existed in the original tool set are visible to the LLM
+- Multiple schema iterations (nested object, simplified string) made no difference
 
-1. Posts GitHub PR review → gets `review_id`, `review_url`
-2. Persists findings into `review_findings`
-3. Updates run status to COMPLETED with verdict
-4. Records audit trail
+### Resolution Path
+Tracked under **milestone #32**: tool contract, runtime exposure verification, introspection, and release gates for tool changes.
 
-If GitHub review posts but persistence fails, the failure is recorded explicitly — the run is never left in a half-complete state.
-
-### Old vs New Protocol
-
-**Old (unreliable):**
-```
-Step 4: gov_create_pr_review    ← bot finishes turn here
-Step 5: gov_report_review_completion  ← often skipped
-```
-
-**New (atomic):**
-```
-Step 4: gov_submit_structured_pr_review  ← one call does both
-```
-
-### Fallback
-- `gov_report_review_completion` remains as fallback for legacy/compatibility
-- `gov_create_pr_review` remains for workflow-mode reviewers (orchestrator path)
-- `review_watchdog.py` handles recovery for stuck DISPATCHED runs
-
-### What Part of #285 Is Actually Closed
-- **Closed**: Findings persistence via atomic tool path — review submission and findings are no longer split
-- **Closed**: Run status + verdict + finding_count updated atomically
-- **Closed**: Audit trail for atomic review submission
-- **Partial**: `fix_commit_sha` capture requires bot to report after `gov_push_files` (future)
-- **Partial**: Finding-level closure comparison runs during re-review but depends on findings being persisted (now unblocked)
+### Current Workaround
+The stable feature path uses `gov_create_pr_review` — a tool that predates this issue and is reliably visible to the LLM. Finding persistence and `/agentopia fix` commands remain partial until the platform blocker is resolved.
