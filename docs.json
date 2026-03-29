@@ -82,6 +82,23 @@
         ]
       },
       {
+        "tab": "Milestones",
+        "groups": [
+          {
+            "group": "Active",
+            "pages": [
+              "milestones/p1-web-app-primary-dual-lane-mvp"
+            ]
+          },
+          {
+            "group": "Completed",
+            "pages": [
+              "milestones/m6.2-deterministic-delivery"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Operations",
         "groups": [
           {
