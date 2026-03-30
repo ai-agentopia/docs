@@ -41,7 +41,6 @@
           {
             "group": "Overview",
             "pages": [
-              "index",
               "architecture/overview"
             ]
           },
@@ -115,17 +114,18 @@
         ]
       },
       {
-        "tab": "Milestones",
+        "tab": "Roadmap",
         "groups": [
           {
-            "group": "Active",
+            "group": "Roadmap",
             "pages": [
-              "milestones/p1-web-app-primary-dual-lane-mvp"
+              "roadmap"
             ]
           },
           {
-            "group": "Completed",
+            "group": "Milestone Traces",
             "pages": [
+              "milestones/p1-web-app-primary-dual-lane-mvp",
               "milestones/m6.2-deterministic-delivery"
             ]
           }
