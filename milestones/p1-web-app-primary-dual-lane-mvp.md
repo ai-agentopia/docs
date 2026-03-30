@@ -4,9 +4,9 @@ title: "P1: Web-App Primary Dual-Lane MVP"
 
 # P1: Web-App Primary Dual-Lane MVP
 
-**Status**: Rescoped — implementation can continue
-**Date**: 2026-03-29
-**Type**: Milestone trace document
+**Status**: In execution — Wave 1 (#258, #259) + Wave 2 (#257, #290) active
+**Date**: 2026-03-30
+**Type**: Milestone trace document — canonical execution reference
 **Primary repos**: `ai-agentopia/agentopia-protocol`, `ai-agentopia/agentopia-ui`
 
 ---
@@ -248,8 +248,55 @@ Complex graph branching, LLM-driven routing, multi-packet parallel delivery, mul
 
 ---
 
-## 11. Milestone Decision
+## 11. Execution Status (2026-03-30)
 
-P1 is now **clean enough to continue implementation**. The remaining 6 issues are well-scoped with clear dependencies. Four issues (#257, #258, #259, #263) can start in parallel immediately.
+### Wave 1 — Boundary blockers
 
-P1 is **not release-ready**. No runtime/E2E proof exists for any P1 feature. The release gate is #264, which depends on all other remaining issues.
+#### #258 Boundary 1 — Remove start_delivery
+- `gateway/extensions/wf-bridge/index.ts`: `start_delivery` tool removed; `before_agent_start` hint updated to route `/wf start` → `wf_command` or inform user to use Workflow UI
+- `bot-config-api/src/prompts/bot_prompts.py`: `DELIVERY_TEMPLATES["orchestrator"]` updated — no start_delivery reference; SYSTEM_PROMPT Hard Rules updated; `build_a2a_section()` updated
+- **Evidence level**: Implemented in code (PR pending)
+
+#### #259 Boundary 3 — executionClass propagation
+- `gateway/extensions/governance-bridge/index.ts`: Tool factory pattern implemented — reads `toolContext.executionClass`, falls back to `"general_chat"`. `[P1-DEBUG-GOV]` log confirms value received.
+- `bot-config-api/src/routers/governance.py`: `execution_class` field accepted and forwarded to `check_execution_authorization()`
+- `bot-config-api/src/services/governance/policy.py`: Matrix enforced — `execution_write` + `review_write` require `workflow_dispatch`
+- **Evidence level**: Implemented in code. Runtime proof requires: deploy to dev → check `[P1-DEBUG-GOV]` logs during sidecar dispatch — should show `executionClass=workflow_dispatch`; during Communication chat — should show `executionClass=general_chat`
+- **Remaining gap**: Actual propagation in the OpenClaw runtime is in the private `agentopia-core` SDK. Requires a test run to confirm `toolContext.executionClass` is set correctly by the SDK for sidecar vs chat modes.
+
+### Wave 2 — Workflow conversation
+
+#### #257 Workflow conversation API
+- `bot-config-api/db/021_workflow_messages.sql`: new `workflow_messages` table
+- `bot-config-api/src/routers/workflow_conversations.py`: `POST /api/v1/workflows/{id}/messages`, `GET /api/v1/workflows/{id}/messages`
+- `bot-config-api/src/main.py`: router registered
+- **Evidence level**: Implemented in code (PR pending)
+
+#### #290 Workflow conversation frontend
+- `agentopia-ui/src/components/workflow/WorkflowConversation.tsx`: new component — message list + input, WS session keyed by `wf-{workflowId}`
+- `agentopia-ui/src/components/workflow/WorkflowDetail.tsx`: Conversation section added
+- `agentopia-ui/src/hooks/useWorkflows.ts`: `useWorkflowMessages` hook added
+- **Evidence level**: Implemented in code (PR pending)
+
+### Wave 3 — Doc alignment
+
+#### #263 Stale doc alignment
+- `docs/architecture/overview.md`: updated — delivery-start contract = Workflow UI only
+- `docs/architecture/p1-execution-authorization.md`: updated — current implementation status
+- `docs/operations/delivery-workflow-gaps.md`: updated — Boundary 1 fix noted
+- **Evidence level**: Implemented in code
+
+### Wave 4 — E2E proof (#264)
+
+Not yet started. Requires all Wave 1–3 work deployed to dev. Gate criteria:
+1. Communication lane works (chat, streaming)
+2. Workflow start via Workflow UI → delivery workflow created
+3. No model-start delivery possible (start_delivery tool absent from tool list)
+4. Workflow conversation panel works (send message, receive response, separate from comm lane)
+5. Worker/reviewer bot governance tool call during sidecar dispatch shows `executionClass=workflow_dispatch` in logs
+
+## 12. Milestone Decision
+
+P1 is **in execution**. Implementation waves are complete. Release gate is #264 (E2E proof), which requires deployment to dev and runtime evidence collection.
+
+P1 is **not release-ready** until #264 evidence is attached.

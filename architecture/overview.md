@@ -5,17 +5,14 @@ title: "Agentopia Architecture Overview"
 # Agentopia Architecture Overview
 
 > High-level architecture for the Agentopia autonomous multi-bot delivery platform.
-> Aligned with: `docs/architecture/p1-rebase-web-primary-dual-lane.md` (LOCKED 2026-03-22)
-> Last updated: 2026-03-22
+> Aligned with: `docs/milestones/p1-web-app-primary-dual-lane-mvp.md`
+> Last updated: 2026-03-30
 
 ---
 
 ## 1. P1 Target Architecture (Web-App Primary)
 
-> **Note:** This section describes the P1 target state, not the current implemented state.
-> The unified web app, auth/session layer, Communication API (`/api/v1/chat/*`), Workflow API extensions (`/api/v1/workflows/*`), and frontend do NOT exist yet.
-> What exists today: bot-config-api with admin API + delivery start + governance, Temporal workflow, sidecar dispatch, gateway with extensions, Telegram integration.
-> See "What is real today" vs "What is P1 target" below.
+> **Note:** P1 implementation is in progress (2026-03-30). The unified web app, auth/session layer, Communication API, and Workflow API all exist in code. Workflow-scoped conversation is being added. The `start_delivery` model tool has been removed (Boundary 1 enforced). See P1 milestone doc for remaining scope.
 
 ```mermaid
 graph TB
@@ -123,39 +120,30 @@ Communication and Workflow are not cosmetic tabs — they hit different API surf
 | **2. Worker/reviewer normal chat** | Governance defaults to general_chat → denies writes. | NO |
 | **3. Worker/reviewer sidecar execution** | Dispatch port 18790 + executionClass propagation → governance allows writes. | YES |
 
-### What is implemented today
+### What is implemented
 
-- **Typed delivery start**: `POST /api/v1/delivery/start` with `DeliveryTargetRef`. Currently called via `start_delivery` wf-bridge tool (model-driven). P1 target: called by Workflow UI form instead.
+- **Typed delivery start**: `POST /api/v1/delivery/start` with `DeliveryTargetRef`. Called by Workflow UI form (web app). `start_delivery` model tool removed (Boundary 1).
 - **Temporal workflow**: DeliveryWorkflow with 9 signals, 6 updates, 3 queries. State machine: PLANNED → IN_DEV → DEV_DONE → QA_APPROVED → MERGE_READY → DONE
-- **Sidecar dispatch**: Sidecar → dispatch port 18790 (localhost-only, not exposed via K8s Service) → gateway with executionClass. Task lifecycle API with correlation tracking
-- **Governance**: 28 API tools classified into 5 action classes. execution_class × action_class authorization matrix. Fail-closed for unknown.
+- **Sidecar dispatch**: Sidecar → dispatch port 18790 (localhost-only) → gateway with `executionClass: workflow_dispatch`. Task lifecycle API with correlation tracking
+- **Governance**: 28 API tools classified into 5 action classes. `execution_class × action_class` authorization matrix. Fail-closed for unknown.
 - **LangGraph**: Planner, reviewer, routing graphs. Run inside Temporal activities (ephemeral, no I/O)
 - **A2A consultation**: Bot-to-bot relay for questions, brainstorming. Separate from delivery dispatch
-- **Role contracts**: Orchestrator (`start_delivery` + `wf_status` + `wf_command`), worker (`wf_status` only), reviewer (`wf_status` only). P1 target: `start_delivery` removed from orchestrator model surface.
-- **Persistence**: Runs, bindings, packets, A2A tasks, gate verdicts, objectives, activation records in Postgres. Auto-migration on startup.
+- **Role contracts**: Orchestrator (`wf_status` + `wf_command`), worker (`wf_status` only), reviewer (`wf_status` only). `start_delivery` removed from model surface.
+- **Persistence**: Runs, bindings, packets, A2A tasks, gate verdicts, objectives, activation records, conversations, workflow messages in Postgres. Auto-migration on startup.
 - **Bot activation**: 4 gates (SOUL, binding, MCP, tools). Deployment validation. Only ACTIVE bots eligible for delivery routing
-- **Telegram integration**: Primary interaction surface today. P1 target: web app becomes primary, Telegram becomes optional secondary.
-- **Review fallback**: 60s grace window + GitHub verification. One-shot resolution guard. Per-round reset for rework loop
-- **Admin UI**: agentopia-ui (separate React app, deployed independently). Bot CRUD, config, deploy, governance.
+- **Auth/session layer**: `admin_user` principal, BFF session, httpOnly cookie, route guards. `require_auth`, `require_dual_auth` dependencies.
+- **Communication API** (`/api/v1/chat/*`, WS): Chat proxy, conversation persistence. WebSocket for real-time streaming.
+- **Workflow API** (`/api/v1/workflows/*`): List, detail, artifacts, workflow-scoped conversation endpoints.
+- **Unified web app**: agentopia-ui with Communication lane + Workflow lane + Admin sections. React 19 + Vite.
+- **Review system**: SCM-bound and workflow-scoped reviewer coexistence. Metadata-based dispatch filtering. GitHub webhook integration.
+- **Telegram integration**: Optional secondary interaction surface (web app is primary).
 
-### What is P1 target (not yet built)
+### Known system gaps
 
-- **Unified web app**: Frontend with Communication + Workflow + Admin sections. Does not exist.
-- **Auth/session layer**: `admin_user` principal, BFF session, httpOnly cookie, route guards. Does not exist.
-- **Communication API** (`/api/v1/chat/*`): Chat proxy, conversation persistence, SSE streaming. Does not exist.
-- **Workflow API extensions** (`/api/v1/workflows/*`): List, detail, artifacts, workflow conversation endpoints. Does not exist.
-- **Conversation/message persistence**: Tables for web conversations. Does not exist.
-- **`start_delivery` removal from model surface**: P1 target. Currently still in orchestrator tool surface.
-- **Boundary 3 fix**: executionClass propagation through runtime. Known gaps, fix required (#352).
-
-### Known system gaps (current state)
-
-- **Execution authorization (Boundary 3)**: executionClass propagation from dispatch port through runtime to governance-bridge has known gaps. Re-verification + fix required (P1 #352)
-- **Delivery start path**: Currently model-driven (`start_delivery` tool). P1 replaces with Workflow UI form → typed API
-- **Delivery completion semantics**: Sidecar marks "completed" on any LLM text response, not artifact verification
-- **Workflow no-PR guard**: **FIXED** — workflow blocks at `wait_dev` when no PR found. No auto-escalation yet
-- **No auto-escalation**: `wait_dev` blocks indefinitely if worker fails. Manual cancel required
-- **Delivery start API trust**: Product entrypoint, not hardened boundary. No caller auth. Network isolation only. Activation gating downstream.
+- **Execution authorization (Boundary 3)**: `executionClass` propagation implemented in code across `agentopia-core` and governance-bridge. Runtime verification pending (P1 #259).
+- **Delivery completion semantics**: Sidecar marks "completed" on any LLM text response, not artifact verification.
+- **No auto-escalation**: `wait_dev` blocks indefinitely if worker fails. Manual cancel required.
+- **Delivery start API trust**: Product entrypoint, not hardened boundary. Dual-auth guard accepts session cookie or service token.
 
 ---
 
