@@ -15,7 +15,7 @@ Agentopia's relay/A2A mechanism is semantically overloaded. The same tools can b
 - **Consultation:** "What do you think about this approach?"
 - **Delivery delegation:** "Create a branch and implement this feature"
 
-This makes delivery correctness depend on LLM prompt compliance rather than deterministic policy enforcement. A weaker model (or even a strong model on a bad day) can bypass the workflow by directly delegating delivery work via relay instead of using the canonical `start_delivery` path.
+This makes delivery correctness depend on LLM prompt compliance rather than deterministic policy enforcement. A weaker model (or even a strong model on a bad day) can bypass the workflow by directly delegating delivery work via relay instead of using the proper delivery-start path.
 
 The architecture must separate consultation from delivery enforcement by **execution-level authorization**, not by prompt guidance alone.
 
@@ -70,7 +70,7 @@ Every request to the agent execution engine is classified into exactly one execu
 The system supports two semantic lanes:
 
 - **Lane A — Consultation:** Bot-to-bot questions, brainstorming, status discussion, specialist consultation. No delivery artifacts created. Uses `consultation_read` tools.
-- **Lane B — Delivery:** Build/fix/change code in repository. Canonical entrypoint: `start_delivery`. Workflow/state machine owns sequencing. Uses `execution_write` and `review_write` tools.
+- **Lane B — Delivery:** Build/fix/change code in repository. Canonical entrypoint: Workflow UI form → `POST /api/v1/delivery/start`. Workflow/state machine owns sequencing. Uses `execution_write` and `review_write` tools. The `start_delivery` model tool has been removed from the bot surface (Boundary 1, #258).
 
 Lane selection is a UX/semantic concern. Lane enforcement is an execution authorization concern. The authorization matrix (section 2.3) is the hard boundary, not lane detection.
 
@@ -116,43 +116,38 @@ General chat callers must retain access to `consultation_read` tools. The runtim
 
 ---
 
-## 4. Current Implementation Options (OpenClaw Runtime)
+## 4. Implementation Status (OpenClaw Runtime)
 
-All options require gateway fork (milestone #25). These are implementation candidates, NOT the architecture itself.
+**Chosen approach:** Option A — dedicated loopback port (dispatch port).
 
-| Option | Mechanism | Trust Level | Effort |
-|---|---|---|---|
-| **A. Dedicated loopback port** | Sidecar calls `localhost:{dispatch_port}`. Gateway listens on separate port for dispatch. K8s Service does NOT expose dispatch port | Network-level (pod-local only) | Medium |
-| **B. Unix domain socket** | Sidecar and gateway share a Unix socket via emptyDir volume. Sidecar writes dispatch requests to socket | Filesystem-level (strongest isolation) | Medium-High |
-| **C. Shared pod-local secret header** | Sidecar and gateway share a secret via same K8s Secret. Sidecar sets secret header on dispatch requests. Gateway verifies | Header-based (weaker than A/B) | Low-Medium |
-| **D. gRPC channel** | Separate gRPC service for dispatch. REST remains for general chat | Protocol-level separation | High |
+### Propagation chain (verified in code, 2026-03-30)
 
-**Recommendation:** Option A (dedicated loopback port) — simplest network-level trust, sufficient for P1.
+| Layer | File | Mechanism |
+|---|---|---|
+| 1. Dispatch server created | `agentopia-core/src/gateway/server-runtime-state.ts:201` | `executionClass: "workflow_dispatch"` passed to server constructor |
+| 2. Request stamp | `agentopia-core/src/gateway/server-http.ts:551` | `req.__executionClass = opts.executionClass` (immutable, server-owned) |
+| 3. Agent input builder | `agentopia-core/src/gateway/openai-http.ts:245-247` | Reads stamp, defaults `"general_chat"` for non-dispatch |
+| 4. Tool context propagation | `agentopia-core/src/agents/pi-tools.ts:503,547` | `executionClass` flows through tool factory → `OpenClawPluginToolContext` |
+| 5. governance-bridge reads | `agentopia-protocol/gateway/extensions/governance-bridge/index.ts:608` | `toolContext?.executionClass \|\| "general_chat"` → sends as `execution_class` in body |
+| 6. Backend enforcement | `agentopia-protocol/bot-config-api/src/governance/policy.py:141-237` | `check_execution_authorization()` evaluates full matrix |
+
+### Runtime verification
+
+Debug logs are in place:
+- `[P1-DEBUG] executionClass=...` in `openai-http.ts:250-252`
+- `[P1-DEBUG-GOV] tool=... toolContext.executionClass=...` in `governance-bridge/index.ts:609`
+
+Runtime verification requires: deploy to dev → trigger sidecar dispatch → check logs for `executionClass=workflow_dispatch`. Then trigger Communication chat → check logs for `executionClass=general_chat`.
 
 ---
 
-## 5. Migration Plan
+## 5. Migration Status
 
-| Phase | What | Enforcement | Known Gap |
-|---|---|---|---|
-| **Tactical (now)** | Remove relay write tools from orchestrator configmap (`wfBridgeRoleKey`). Implement coarse actor-level dispatch check in governance router | Tool surface (configmap) + actor-level | Concurrent relay piggyback during active dispatch (low probability) |
-| **P1 (gateway fork)** | Implement RC-1 through RC-5. Gateway stamps trusted `execution_class`. Governance router enforces authorization matrix | Session-level, runtime-stamped, un-spoofable | None — hard enforcement |
-| **P2 (hardening)** | Dispatch capability token (Biscuit). Per-tool cryptographic authorization | Per-tool cryptographic | None |
-
-### Tactical Mitigation (Current — NOT Final Enforcement)
-
-Actor-level active dispatch check in governance router:
-- If worker/reviewer calls `execution_write`/`review_write` and has no active dispatch (task in "working" state) → 403
-- Known gap: concurrent relay message during active dispatch can piggyback on actor-level grant
-- Labeled: **coarse mitigation only**
-
-### P1 Target (After Gateway Fork)
-
-Gateway stamps `execution_class` based on ingress channel:
-- Trusted dispatch channel → `workflow_dispatch`
-- All other channels → `general_chat`
-- Governance router checks `execution_class` for `execution_write` and `review_write`
-- Zero piggyback risk — general chat stamped as `general_chat`, cannot become `workflow_dispatch`
+| Phase | Status | Notes |
+|---|---|---|
+| **Tactical** | Complete | Actor-level dispatch check in governance router |
+| **P1** | Implemented in code | RC-1 through RC-5 implemented. Option A (dispatch port). Runtime verification pending. |
+| **P2 (hardening)** | Deferred | Dispatch capability token (Biscuit). Per-tool cryptographic authorization. |
 
 ---
 
@@ -160,9 +155,9 @@ Gateway stamps `execution_class` based on ingress channel:
 
 P1 enables the **execution-safe dual-lane model**:
 - After P1: A2A consultation reads are OK, delivery writes denied without active workflow dispatch
-- After P1: orchestrator can freely use relay for consultation while delivery is enforced through `start_delivery`
-- **Start-path integrity NOT solved by P1** — orchestrator can still be prompted to bypass `start_delivery` via creative user input. This is an accepted gap until gateway fork (milestone #25) enables deterministic Telegram routing
-- P1 is the **active enforcement milestone**. It is NOT "production-grade start-path architecture" — that requires gateway fork
+- After P1: orchestrator can freely use relay for consultation. Delivery starts only from Workflow UI form.
+- **Start-path integrity**: `start_delivery` tool removed from model surface (Boundary 1). The only delivery-start path is the Workflow UI form calling `POST /api/v1/delivery/start`. The model cannot initiate delivery from chat.
+- P1 is the **active enforcement milestone** for execution authorization boundaries.
 
 ---
 

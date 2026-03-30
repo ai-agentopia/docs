@@ -4,9 +4,9 @@ title: "P1: Web-App Primary Dual-Lane MVP"
 
 # P1: Web-App Primary Dual-Lane MVP
 
-**Status**: Rescoped — implementation can continue
-**Date**: 2026-03-29
-**Type**: Milestone trace document
+**Status**: In execution — Wave 1 (#258, #259) + Wave 2 (#257, #290) active
+**Date**: 2026-03-30
+**Type**: Milestone trace document — canonical execution reference
 **Primary repos**: `ai-agentopia/agentopia-protocol`, `ai-agentopia/agentopia-ui`
 
 ---
@@ -146,15 +146,15 @@ The unified web app shell exists:
 ## 6. Remaining Scope
 
 ### #257 — Workflow conversation API
-**What**: Backend API for workflow-scoped messages: `POST /api/v1/workflows/{id}/messages`, `GET /api/v1/workflows/{id}/messages`. Includes workflow message table, context injection (workflow state as system context), SSE streaming.
-**Why open**: Not implemented — no endpoints, table, or logic exist.
-**Dependencies**: None (can start immediately).
+**What**: Backend API for workflow-scoped messages: `POST /api/v1/workflows/{id}/messages`, `GET /api/v1/workflows/{id}/messages`. Includes `workflow_messages` table. REST transport with cursor-based pagination.
+**Implemented scope**: Persisted message thread (create + list). No context injection, no SSE streaming, no LLM orchestrator prompting. Those are deferred.
+**Dependencies**: None.
 **Blocking**: Yes — #290 (frontend) and #264 (E2E proof) depend on this.
 
 ### #258 — Boundary 1: remove start_delivery from model
 **What**: Remove `start_delivery` tool from the gateway wf-bridge extension. Update orchestrator SOUL templates to reference Workflow UI instead. Verify model cannot initiate delivery from Communication mode.
-**Why open**: `start_delivery` is still registered as a tool in `wf-bridge/index.ts` and referenced in SOUL prompts in `bot_prompts.py`.
-**Dependencies**: None (can start immediately, independent workstream).
+**Status**: Implemented. `start_delivery` tool removed from `wf-bridge/index.ts`. Orchestrator SOUL template and A2A section updated. Stale references in activation.py, tests, and comments cleaned.
+**Dependencies**: None.
 **Blocking**: Yes — security boundary required for #264.
 
 ### #259 — Boundary 3: sidecar executionClass propagation
@@ -170,9 +170,9 @@ The unified web app shell exists:
 **Blocking**: No — can proceed in parallel with all implementation work.
 
 ### #290 — Workflow conversation frontend panel
-**What**: Build the chat panel within `WorkflowDetail` that lets users converse with the orchestrator in workflow context.
-**Why open**: Split from #261. No `WorkflowChat` or `WorkflowConversation` component exists in `agentopia-ui`.
-**Dependencies**: #257 must provide the backend API first.
+**What**: Message panel within `WorkflowDetail` for workflow-scoped messages. REST + React Query polling. Not a real-time LLM conversation surface — that is deferred.
+**Implemented scope**: Message list + composer, 10s polling, user/assistant/system role display. Separate from Communication lane (no gateway-ws, no conversation-store).
+**Dependencies**: #257 backend API.
 **Blocking**: Yes — required for #264 E2E scenario coverage.
 
 ### #264 — E2E proof (5 scenarios)
@@ -187,8 +187,8 @@ The unified web app shell exists:
 
 ### Boundary 1 — Workflow start surface
 **Intent**: Only the Workflow UI form can start delivery. The model cannot call `start_delivery`.
-**Current status**: NOT enforced. `start_delivery` tool is still registered in `wf-bridge/index.ts:396` and SOUL prompts teach the orchestrator to use it.
-**Fix**: #258 — remove the tool from wf-bridge config, update SOUL templates.
+**Current status**: Enforced. `start_delivery` tool removed from `wf-bridge/index.ts`. SOUL templates and A2A section updated. `/wf start` returns "use Workflow UI" hint. Stale references cleaned from activation.py, tests, comments.
+**Evidence**: Structurally validated — tests assert tool is absent, prompt contains no positive instruction to use it.
 
 ### Boundary 2 — Worker read-only in Communication
 **Intent**: Worker bots chatting in Communication mode cannot create delivery artifacts (branches, PRs).
@@ -248,8 +248,88 @@ Complex graph branching, LLM-driven routing, multi-packet parallel delivery, mul
 
 ---
 
-## 11. Milestone Decision
+## 11. Execution Status (2026-03-30)
 
-P1 is now **clean enough to continue implementation**. The remaining 6 issues are well-scoped with clear dependencies. Four issues (#257, #258, #259, #263) can start in parallel immediately.
+### Wave 1 — Boundary blockers
 
-P1 is **not release-ready**. No runtime/E2E proof exists for any P1 feature. The release gate is #264, which depends on all other remaining issues.
+#### #258 Boundary 1 — Remove start_delivery
+- `gateway/extensions/wf-bridge/index.ts`: `start_delivery` tool registration removed. `/wf start` hook returns "use Workflow UI" message.
+- `bot-config-api/src/prompts/bot_prompts.py`: orchestrator DELIVERY_TEMPLATES, SYSTEM_PROMPT Hard Rules, `build_a2a_section()` all updated — no positive `start_delivery` instruction remains.
+- `bot-config-api/src/routers/activation.py`: role marker and comments cleaned.
+- `wf-bridge.test.ts`: regression test replaced with Boundary 1 removal assertion.
+- `test_llm_generator.py`: orchestrator A2A assertion updated.
+- `test_delivery_templates.py`: 3 tests updated to assert Boundary 1 contract.
+- **Evidence level**: Structurally validated — tests assert tool is absent from source, prompt contains no positive instruction, stale references cleaned across active code/tests/comments.
+
+#### #259 Boundary 3 — executionClass propagation
+- **Code-traced propagation chain** (verified 2026-03-30):
+  1. `agentopia-core/src/gateway/server-runtime-state.ts:201` — dispatch port server created with `executionClass: "workflow_dispatch"`
+  2. `agentopia-core/src/gateway/server-http.ts:551` — stamps `req.__executionClass` (immutable, server-owned)
+  3. `agentopia-core/src/gateway/openai-http.ts:245-247` — reads stamp, defaults `"general_chat"`
+  4. `agentopia-core/src/agents/pi-tools.ts:503,547` — flows through to `OpenClawPluginToolContext.executionClass`
+  5. `governance-bridge/index.ts:608` — reads `toolContext?.executionClass` → sends as `execution_class`
+  6. `governance/policy.py:141-237` — `check_execution_authorization()` enforces full matrix
+- Debug logs in place: `[P1-DEBUG]` in openai-http.ts, `[P1-DEBUG-GOV]` in governance-bridge
+- **Evidence level**: Implemented in code, propagation traced across both repos. **NOT runtime-proven.** Runtime verification requires: deploy → trigger sidecar dispatch → check debug logs.
+
+### Wave 2 — Workflow conversation
+
+#### #257 Workflow conversation API
+- `bot-config-api/db/021_workflow_messages.sql`: new `workflow_messages` table
+- `bot-config-api/src/routers/workflow_conversations.py`: `POST /api/v1/workflows/{id}/messages`, `GET /api/v1/workflows/{id}/messages`
+- `bot-config-api/src/main.py`: router registered
+- `bot-config-api/src/tests/test_workflow_conversations.py`: 22 tests — model validation, route registration, scope boundaries, handler behavior via mock pool (create/list/404/503)
+- **P1 scope decision (Option A)**: Persisted message thread only. No context injection, no SSE, no LLM prompting. Full conversation loop is deferred (Wave F).
+- **Evidence level**: Behaviorally validated (backend) — handler logic exercised through mock pool: create returns correct shape, 404 for missing workflow, 503 without DB, list returns messages in order, auth guard verified.
+
+#### #290 Workflow conversation frontend
+- `agentopia-ui/src/components/workflow/WorkflowConversation.tsx`: message list + composer. REST + React Query polling (10s), NOT WebSocket.
+- `agentopia-ui/src/components/workflow/WorkflowDetail.tsx`: Conversation section added between Artifacts and Trello.
+- `agentopia-ui/src/hooks/useWorkflows.ts`: `useWorkflowMessages` hook (React Query, GET /workflows/{id}/messages).
+- `agentopia-ui/src/__tests__/workflow-conversation.test.ts`: 16 tests — export checks, source-level scope boundary enforcement, WorkflowDetail integration checks, message rendering contract checks.
+- **P1 scope decision (Option A)**: Persisted message thread UI. NOT a real-time conversation loop. No bot is prompted via this surface.
+- **Evidence level**: Structurally validated with limited behavioral coverage (frontend) — tests verify imports, scope boundaries (no WS, no conversation-store), integration wiring, and rendering contract via source inspection. No DOM render tests or user interaction simulation.
+
+### Wave 3 — Doc alignment
+
+#### #263 Stale doc alignment
+- `docs/architecture/overview.md`: updated — delivery-start contract = Workflow UI only
+- `docs/architecture/p1-execution-authorization.md`: updated — current implementation status
+- `docs/operations/delivery-workflow-gaps.md`: updated — Boundary 1 fix noted
+- **Evidence level**: Implemented in code
+
+### Wave 4 — E2E proof (#264)
+
+Not yet started. Requires all Wave 1–3 work deployed to dev. Gate criteria:
+1. Communication lane works (chat, streaming)
+2. Workflow start via Workflow UI → delivery workflow created
+3. No model-start delivery possible (start_delivery tool absent from tool list)
+4. Workflow conversation panel works (send message, receive response, separate from comm lane)
+5. Worker/reviewer bot governance tool call during sidecar dispatch shows `executionClass=workflow_dispatch` in logs
+
+## 12. Scope Decision: Workflow Conversation
+
+**Option A accepted**: Minimal persisted workflow-scoped message thread is sufficient for P1.
+
+**Rationale**: P1's objective is "web app primary, workflow lane with workflow-scoped conversation." Communication lane already provides live orchestrator chat. The workflow conversation panel adds a distinct message surface scoped to a specific delivery workflow. A full orchestrator reply loop (context injection, LLM prompting, streaming) is Wave F scope.
+
+**What is accepted for P1**: REST API for create/list messages, React Query polling, message panel in WorkflowDetail. Separate from Communication lane.
+
+**What is deferred**: Context injection (workflow state as system prompt), SSE streaming, LLM orchestrator prompting through workflow panel.
+
+## 13. Milestone Decision
+
+P1 scope is fixed. Implementation status:
+- **#258**: Structurally validated — Boundary 1 enforced, stale contract cleaned
+- **#257**: Behaviorally validated (backend) — minimal persisted thread, handler logic exercised
+- **#290**: Structurally validated with limited behavioral coverage (frontend) — component exists, scope boundaries verified, no DOM render tests
+- **#259**: Code-traced — propagation chain verified across both repos, runtime proof pending
+- **#263**: Substantially complete — key docs updated, minor stale refs in pre-P1 design docs not blocking
+- **#264**: Not started — blocked on deploy
+
+**Remaining blockers are runtime/deploy only:**
+1. Deploy to dev
+2. Verify #259 via `[P1-DEBUG-GOV]` logs
+3. Execute #264 E2E scenarios
+
+P1 is **not release-ready** until #264 evidence is attached.
