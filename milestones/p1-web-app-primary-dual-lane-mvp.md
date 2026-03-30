@@ -146,9 +146,9 @@ The unified web app shell exists:
 ## 6. Remaining Scope
 
 ### #257 — Workflow conversation API
-**What**: Backend API for workflow-scoped messages: `POST /api/v1/workflows/{id}/messages`, `GET /api/v1/workflows/{id}/messages`. Includes workflow message table, context injection (workflow state as system context), SSE streaming.
-**Why open**: Not implemented — no endpoints, table, or logic exist.
-**Dependencies**: None (can start immediately).
+**What**: Backend API for workflow-scoped messages: `POST /api/v1/workflows/{id}/messages`, `GET /api/v1/workflows/{id}/messages`. Includes `workflow_messages` table. REST transport with cursor-based pagination.
+**Implemented scope**: Persisted message thread (create + list). No context injection, no SSE streaming, no LLM orchestrator prompting. Those are deferred.
+**Dependencies**: None.
 **Blocking**: Yes — #290 (frontend) and #264 (E2E proof) depend on this.
 
 ### #258 — Boundary 1: remove start_delivery from model
@@ -170,9 +170,9 @@ The unified web app shell exists:
 **Blocking**: No — can proceed in parallel with all implementation work.
 
 ### #290 — Workflow conversation frontend panel
-**What**: Build the chat panel within `WorkflowDetail` that lets users converse with the orchestrator in workflow context.
-**Why open**: Split from #261. No `WorkflowChat` or `WorkflowConversation` component exists in `agentopia-ui`.
-**Dependencies**: #257 must provide the backend API first.
+**What**: Message panel within `WorkflowDetail` for workflow-scoped messages. REST + React Query polling. Not a real-time LLM conversation surface — that is deferred.
+**Implemented scope**: Message list + composer, 10s polling, user/assistant/system role display. Separate from Communication lane (no gateway-ws, no conversation-store).
+**Dependencies**: #257 backend API.
 **Blocking**: Yes — required for #264 E2E scenario coverage.
 
 ### #264 — E2E proof (5 scenarios)
@@ -258,11 +258,15 @@ Complex graph branching, LLM-driven routing, multi-packet parallel delivery, mul
 - **Evidence level**: Implemented in code (PR pending)
 
 #### #259 Boundary 3 — executionClass propagation
-- `gateway/extensions/governance-bridge/index.ts`: Tool factory pattern implemented — reads `toolContext.executionClass`, falls back to `"general_chat"`. `[P1-DEBUG-GOV]` log confirms value received.
-- `bot-config-api/src/routers/governance.py`: `execution_class` field accepted and forwarded to `check_execution_authorization()`
-- `bot-config-api/src/services/governance/policy.py`: Matrix enforced — `execution_write` + `review_write` require `workflow_dispatch`
-- **Evidence level**: Implemented in code. Runtime proof requires: deploy to dev → check `[P1-DEBUG-GOV]` logs during sidecar dispatch — should show `executionClass=workflow_dispatch`; during Communication chat — should show `executionClass=general_chat`
-- **Remaining gap**: Actual propagation in the OpenClaw runtime is in the private `agentopia-core` SDK. Requires a test run to confirm `toolContext.executionClass` is set correctly by the SDK for sidecar vs chat modes.
+- **Code-traced propagation chain** (verified 2026-03-30):
+  1. `agentopia-core/src/gateway/server-runtime-state.ts:201` — dispatch port server created with `executionClass: "workflow_dispatch"`
+  2. `agentopia-core/src/gateway/server-http.ts:551` — stamps `req.__executionClass` (immutable, server-owned)
+  3. `agentopia-core/src/gateway/openai-http.ts:245-247` — reads stamp, defaults `"general_chat"`
+  4. `agentopia-core/src/agents/pi-tools.ts:503,547` — flows through to `OpenClawPluginToolContext.executionClass`
+  5. `governance-bridge/index.ts:608` — reads `toolContext?.executionClass` → sends as `execution_class`
+  6. `governance/policy.py:141-237` — `check_execution_authorization()` enforces full matrix
+- Debug logs in place: `[P1-DEBUG]` in openai-http.ts, `[P1-DEBUG-GOV]` in governance-bridge
+- **Evidence level**: Implemented in code, propagation traced across both repos. **NOT runtime-proven.** Runtime verification requires: deploy → trigger sidecar dispatch → check debug logs.
 
 ### Wave 2 — Workflow conversation
 
@@ -270,13 +274,16 @@ Complex graph branching, LLM-driven routing, multi-packet parallel delivery, mul
 - `bot-config-api/db/021_workflow_messages.sql`: new `workflow_messages` table
 - `bot-config-api/src/routers/workflow_conversations.py`: `POST /api/v1/workflows/{id}/messages`, `GET /api/v1/workflows/{id}/messages`
 - `bot-config-api/src/main.py`: router registered
-- **Evidence level**: Implemented in code (PR pending)
+- `bot-config-api/src/tests/test_workflow_conversations.py`: model validation, route registration, scope boundary tests
+- **Scope**: Persisted message thread only. No context injection, no SSE, no LLM prompting.
+- **Evidence level**: Implemented in code, partially validated (tests pass)
 
 #### #290 Workflow conversation frontend
-- `agentopia-ui/src/components/workflow/WorkflowConversation.tsx`: new component — message list + input, WS session keyed by `wf-{workflowId}`
-- `agentopia-ui/src/components/workflow/WorkflowDetail.tsx`: Conversation section added
-- `agentopia-ui/src/hooks/useWorkflows.ts`: `useWorkflowMessages` hook added
-- **Evidence level**: Implemented in code (PR pending)
+- `agentopia-ui/src/components/workflow/WorkflowConversation.tsx`: new component — message list + composer. REST + React Query polling (10s), NOT WebSocket.
+- `agentopia-ui/src/components/workflow/WorkflowDetail.tsx`: Conversation section added between Artifacts and Trello.
+- `agentopia-ui/src/hooks/useWorkflows.ts`: `useWorkflowMessages` hook added (React Query, GET /workflows/{id}/messages).
+- **Scope**: Persisted workflow-scoped message thread only. NOT a real-time conversation loop with LLM orchestrator behavior. No bot is prompted via this surface.
+- **Evidence level**: Implemented in code, partially validated (scope tests pass)
 
 ### Wave 3 — Doc alignment
 
@@ -297,6 +304,8 @@ Not yet started. Requires all Wave 1–3 work deployed to dev. Gate criteria:
 
 ## 12. Milestone Decision
 
-P1 is **in execution**. Implementation waves are complete. Release gate is #264 (E2E proof), which requires deployment to dev and runtime evidence collection.
+P1 is **in progress**. Boundary 1 (#258) is cleaned, workflow conversation (#257/#290) delivers a persisted message thread (minimal viable scope), executionClass (#259) is code-traced but not runtime-proven.
+
+**Not code-complete yet.** #257/#290 delivers only a persisted message thread — the full workflow conversation behavior (context injection, LLM orchestrator prompting, SSE streaming) is deferred scope. #259 requires runtime verification.
 
 P1 is **not release-ready** until #264 evidence is attached.
