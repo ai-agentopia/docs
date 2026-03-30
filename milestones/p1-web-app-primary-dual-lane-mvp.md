@@ -153,8 +153,8 @@ The unified web app shell exists:
 
 ### #258 — Boundary 1: remove start_delivery from model
 **What**: Remove `start_delivery` tool from the gateway wf-bridge extension. Update orchestrator SOUL templates to reference Workflow UI instead. Verify model cannot initiate delivery from Communication mode.
-**Why open**: `start_delivery` is still registered as a tool in `wf-bridge/index.ts` and referenced in SOUL prompts in `bot_prompts.py`.
-**Dependencies**: None (can start immediately, independent workstream).
+**Status**: Implemented. `start_delivery` tool removed from `wf-bridge/index.ts`. Orchestrator SOUL template and A2A section updated. Stale references in activation.py, tests, and comments cleaned.
+**Dependencies**: None.
 **Blocking**: Yes — security boundary required for #264.
 
 ### #259 — Boundary 3: sidecar executionClass propagation
@@ -187,8 +187,8 @@ The unified web app shell exists:
 
 ### Boundary 1 — Workflow start surface
 **Intent**: Only the Workflow UI form can start delivery. The model cannot call `start_delivery`.
-**Current status**: NOT enforced. `start_delivery` tool is still registered in `wf-bridge/index.ts:396` and SOUL prompts teach the orchestrator to use it.
-**Fix**: #258 — remove the tool from wf-bridge config, update SOUL templates.
+**Current status**: Enforced. `start_delivery` tool removed from `wf-bridge/index.ts`. SOUL templates and A2A section updated. `/wf start` returns "use Workflow UI" hint. Stale references cleaned from activation.py, tests, comments.
+**Evidence**: Structurally validated — tests assert tool is absent, prompt contains no positive instruction to use it.
 
 ### Boundary 2 — Worker read-only in Communication
 **Intent**: Worker bots chatting in Communication mode cannot create delivery artifacts (branches, PRs).
