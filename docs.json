@@ -74,7 +74,8 @@
             "group": "Design Proposals",
             "pages": [
               "architecture/p0.5-deterministic-delivery-start",
-              "architecture/p1-execution-authorization"
+              "architecture/p1-execution-authorization",
+              "architecture/worker-pool-routing-improvement-plan"
             ]
           },
           {
