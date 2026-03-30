@@ -2,7 +2,7 @@
 # .git, .github, .claude, .agents, .idea, node_modules,
 # README.md, LICENSE.md, CHANGELOG.md, CONTRIBUTING.md
 
-# Internal-only docs (contain infra details, secrets paths, internal hostnames)
+# Internal-only docs (infra details, secrets, internal hostnames, implementation tracking)
 runbooks/
 milestones/
 operations/cloudflare-tunnel.md
@@ -11,6 +11,26 @@ operations/environment-contract.md
 operations/migration-uat.md
 operations/mem0-production-summary.md
 operations/delivery-workflow-gaps.md
+
+# Internal architecture docs (implementation details, gap analysis, internal ADRs)
+architecture/a2a-solution-protocol.md
+architecture/a2a-improvement-plan.md
+architecture/a2a-comparison.md
+architecture/p0.5-deterministic-delivery-start.md
+architecture/repo-split-notes.md
+architecture/reviewer-remediation.md
+architecture/reviewer-coexistence.md
+adrs/
+
+# Internal product docs (local file paths, implementation specs)
+product/uiux-redesign-milestone.md
+product/uiux-dev-handoff.md
+product/uiux-layout-spec.md
+product/uiux-issues.md
+
+# Internal operations
+operations/cicd-contract.md
+operations/documentation-governance.md
 
 # Assets not for web
 Agentopia-avatar.png

@@ -1,52 +1,43 @@
 ---
-title: "Execution Authorization Architecture"
+title: "Execution Authorization"
+description: "Dual-lane security model that separates consultation from delivery through deterministic execution authorization, ensuring delivery actions only occur within trusted workflow contexts."
 ---
 
-# Execution Authorization Architecture
+# Execution Authorization
 
-> Status: FINAL (CTO-approved 2026-03-20)
-> Scope: Dual-lane orchestration — consultation vs delivery enforcement
+## Problem
 
----
+In a multi-agent system where bots communicate freely, the same tools can serve two very different purposes:
 
-## 1. Problem Statement
-
-Agentopia's relay/A2A mechanism is semantically overloaded. The same tools can be used for:
 - **Consultation:** "What do you think about this approach?"
-- **Delivery delegation:** "Create a branch and implement this feature"
+- **Delivery:** "Create a branch and implement this feature"
 
-This makes delivery correctness depend on LLM prompt compliance rather than deterministic policy enforcement. A weaker model (or even a strong model on a bad day) can bypass the workflow by directly delegating delivery work via relay instead of using the proper delivery-start path.
+If both paths use the same authorization, delivery correctness depends on LLM prompt compliance rather than deterministic policy. A model can bypass workflow controls by delegating delivery work through a consultation channel.
 
-The architecture must separate consultation from delivery enforcement by **execution-level authorization**, not by prompt guidance alone.
+Execution authorization solves this by enforcing delivery boundaries at the runtime level, not the prompt level.
 
----
-
-## 2. Architecture Contract (Runtime-Agnostic)
-
-This section defines the authorization model. It does NOT reference any specific runtime (OpenClaw, LangGraph, etc.).
-
-### 2.1 Action Classes
+## Action Classes
 
 Every tool invocation is classified into exactly one action class:
 
 | Class | Description | Examples |
 |---|---|---|
-| `consultation_read` | Read-only queries about code, issues, PRs | get_file_contents, search_code, list_issues, get_pr_files, get_pr_status, get_pr_reviews, get_pr_comments, list_commits |
-| `execution_write` | Code delivery actions that create artifacts | create_branch, push_files, create_or_update_file, create_pull_request, update_pr_branch |
-| `review_write` | Review actions that affect PR state | create_pr_review |
-| `admin_write` | Planning/governance actions by orchestrator | create_milestone, create_issue, update_milestone, close_milestone, update_issue, close_issue, add_issue_comment, merge_pull_request |
-| `audit_read` | Audit/inspection by orchestrator | audit_milestone, audit_repo |
+| `consultation_read` | Read-only queries about code, issues, PRs | `get_file_contents`, `search_code`, `list_issues` |
+| `execution_write` | Delivery actions that create artifacts | `create_branch`, `push_files`, `create_pull_request` |
+| `review_write` | Review actions that affect PR state | `create_pr_review` |
+| `admin_write` | Planning and governance actions | `create_issue`, `merge_pull_request` |
+| `audit_read` | Audit and inspection queries | `audit_milestone`, `audit_repo` |
 
-### 2.2 Execution Classes
+## Execution Classes
 
-Every request to the agent execution engine is classified into exactly one execution class:
+Every request to the agent execution engine is classified into one of two classes:
 
 | Class | Meaning |
 |---|---|
-| `workflow_dispatch` | Request originates from a trusted workflow execution channel. Verified by the runtime, not caller-asserted |
-| `general_chat` | All other requests: consultation, chat, relay, direct API, Telegram messages |
+| `workflow_dispatch` | Request originates from a trusted workflow channel. Verified by the runtime, not caller-asserted. |
+| `general_chat` | All other requests: consultation, relay, direct API, messaging integrations. |
 
-### 2.3 Authorization Matrix
+## Authorization Matrix
 
 | Action Class | Execution Class Required | Role Required |
 |---|---|---|
@@ -56,115 +47,55 @@ Every request to the agent execution engine is classified into exactly one execu
 | `admin_write` | any | orchestrator |
 | `audit_read` | any | orchestrator |
 
-### 2.4 Hard Rules
+## Hard Rules
 
-1. `execution_write` and `review_write` MUST require `workflow_dispatch`. No exceptions.
+1. `execution_write` and `review_write` require `workflow_dispatch`. No exceptions.
 2. `admin_write` is role-authorized only. No workflow dispatch context required.
 3. `consultation_read` is always allowed for any bound actor.
-4. `execution_class` is determined by the runtime, not by request content or caller assertion.
-5. `general_chat` callers can read and discuss but CANNOT create delivery artifacts.
-6. Prompt/SOUL guidance may help UX but is NOT the security boundary.
+4. Execution class is determined by the runtime, not by request content or caller assertion.
+5. General chat callers can read and discuss but cannot create delivery artifacts.
+6. Prompt guidance may improve UX but is not the security boundary.
 
-### 2.5 Dual-Lane Semantic Model
+## Dual-Lane Model
 
-The system supports two semantic lanes:
+The system operates in two semantic lanes:
 
-- **Lane A — Consultation:** Bot-to-bot questions, brainstorming, status discussion, specialist consultation. No delivery artifacts created. Uses `consultation_read` tools.
-- **Lane B — Delivery:** Build/fix/change code in repository. Canonical entrypoint: Workflow UI form → `POST /api/v1/delivery/start`. Workflow/state machine owns sequencing. Uses `execution_write` and `review_write` tools. The `start_delivery` model tool has been removed from the bot surface (Boundary 1, #258).
+**Lane A -- Consultation.** Bot-to-bot questions, brainstorming, status discussion, specialist input. No delivery artifacts are created. Uses `consultation_read` tools only.
 
-Lane selection is a UX/semantic concern. Lane enforcement is an execution authorization concern. The authorization matrix (section 2.3) is the hard boundary, not lane detection.
+**Lane B -- Delivery.** Build, fix, or change code in a repository. Entry point is the workflow UI, which triggers delivery through a trusted dispatch channel. The workflow engine owns sequencing. Uses `execution_write` and `review_write` tools. The delivery-start action is not exposed on the bot's tool surface -- it can only be initiated through the workflow UI.
 
----
+Lane selection is a UX concern. Lane enforcement is an execution authorization concern. The authorization matrix above is the hard boundary.
 
-## 3. Runtime Contract
+## Runtime Contract
 
-Any agent runtime that implements this architecture MUST provide these capabilities:
+Any agent runtime implementing this model must satisfy five requirements:
 
 ### RC-1: Trusted Workflow-Dispatch Channel
 
-The runtime must provide a communication channel between the workflow dispatch component and the agent execution engine that is:
-- Distinguishable from general chat at the **trusted runtime boundary**
-- Not spoofable by general chat callers
-- Stamped by the runtime itself, not by request body content
+The runtime must provide a communication channel between the workflow dispatch component and the agent execution engine that is distinguishable from general chat at a trusted boundary, not spoofable by general chat callers, and stamped by the runtime itself.
 
 ### RC-2: Execution Class Stamping
 
-The runtime must stamp every request with a trusted `execution_class` before tool execution begins:
-- Requests arriving via the trusted workflow-dispatch channel: `workflow_dispatch`
-- All other requests: `general_chat`
-
-The stamp must be immutable once set. Tool handlers must not be able to override it.
+Every request must be stamped with a trusted execution class before tool execution begins. The stamp is immutable once set. Tool handlers cannot override it.
 
 ### RC-3: Tool Execution Context Propagation
 
-The runtime must propagate `execution_class` to the tool execution boundary so that:
-- Tool handlers (or the authorization layer they call) can read the trusted `execution_class`
-- Authorization decisions are made with this context before the tool action executes
+The runtime must propagate execution class to the tool execution boundary so that authorization decisions occur before the tool action executes.
 
-### RC-4: General Chat Cannot Reach Workflow-Dispatch Channel
+### RC-4: Channel Isolation
 
-The trusted workflow-dispatch channel must not be reachable by:
-- External network callers
-- Relay/A2A message forwarding paths
-- Direct user/Telegram messages
-
-Only the co-located workflow dispatch component (sidecar) may use it.
+The trusted workflow-dispatch channel must not be reachable by external network callers, relay or agent-to-agent message forwarding paths, or direct user messages. Only the co-located workflow dispatch component may use it.
 
 ### RC-5: Consultation Preservation
 
-General chat callers must retain access to `consultation_read` tools. The runtime must not block all tool access for general chat — only `execution_write` and `review_write` tools.
+General chat callers must retain access to `consultation_read` tools. The runtime must not block all tool access for general chat -- only `execution_write` and `review_write`.
 
----
+## Design Rationale
 
-## 4. Implementation Status (OpenClaw Runtime)
+This model achieves three goals:
 
-**Chosen approach:** Option A — dedicated loopback port (dispatch port).
+1. **Deterministic enforcement.** Delivery actions are gated by runtime-verified execution class, not LLM behavior. A misbehaving model cannot bypass the boundary.
 
-### Propagation chain (verified in code, 2026-03-30)
+2. **Consultation remains open.** Agents can freely read code, discuss approaches, and consult specialists without workflow overhead. Only artifact-creating actions are restricted.
 
-| Layer | File | Mechanism |
-|---|---|---|
-| 1. Dispatch server created | `agentopia-core/src/gateway/server-runtime-state.ts:201` | `executionClass: "workflow_dispatch"` passed to server constructor |
-| 2. Request stamp | `agentopia-core/src/gateway/server-http.ts:551` | `req.__executionClass = opts.executionClass` (immutable, server-owned) |
-| 3. Agent input builder | `agentopia-core/src/gateway/openai-http.ts:245-247` | Reads stamp, defaults `"general_chat"` for non-dispatch |
-| 4. Tool context propagation | `agentopia-core/src/agents/pi-tools.ts:503,547` | `executionClass` flows through tool factory → `OpenClawPluginToolContext` |
-| 5. governance-bridge reads | `agentopia-protocol/gateway/extensions/governance-bridge/index.ts:608` | `toolContext?.executionClass \|\| "general_chat"` → sends as `execution_class` in body |
-| 6. Backend enforcement | `agentopia-protocol/bot-config-api/src/governance/policy.py:141-237` | `check_execution_authorization()` evaluates full matrix |
-
-### Runtime verification
-
-Debug logs are in place:
-- `[P1-DEBUG] executionClass=...` in `openai-http.ts:250-252`
-- `[P1-DEBUG-GOV] tool=... toolContext.executionClass=...` in `governance-bridge/index.ts:609`
-
-Runtime verification requires: deploy to dev → trigger sidecar dispatch → check logs for `executionClass=workflow_dispatch`. Then trigger Communication chat → check logs for `executionClass=general_chat`.
-
----
-
-## 5. Migration Status
-
-| Phase | Status | Notes |
-|---|---|---|
-| **Tactical** | Complete | Actor-level dispatch check in governance router |
-| **P1** | Implemented in code | RC-1 through RC-5 implemented. Option A (dispatch port). Runtime verification pending. |
-| **P2 (hardening)** | Deferred | Dispatch capability token (Biscuit). Per-tool cryptographic authorization. |
-
----
-
-## 6. Relationship to Permanent Dual-Lane Model
-
-P1 enables the **execution-safe dual-lane model**:
-- After P1: A2A consultation reads are OK, delivery writes denied without active workflow dispatch
-- After P1: orchestrator can freely use relay for consultation. Delivery starts only from Workflow UI form.
-- **Start-path integrity**: `start_delivery` tool removed from model surface (Boundary 1). The only delivery-start path is the Workflow UI form calling `POST /api/v1/delivery/start`. The model cannot initiate delivery from chat.
-- P1 is the **active enforcement milestone** for execution authorization boundaries.
-
----
-
-## 7. References
-
-- [Delivery Start Contract](../contracts/../contracts/delivery-start-contract.md)
-- [Review Verification](../contracts/review-verification.md)
-- [Bot Activation](../contracts/bot-activation.md)
-- [Runtime Boundary Plan](../contracts/runtime-boundary/fully-swappable-runtime-boundary-plan.md)
-- [Architecture Overview](./overview.md)
+3. **Runtime-agnostic contract.** The authorization model is defined independently of any specific agent runtime. Any runtime that satisfies RC-1 through RC-5 can implement it.

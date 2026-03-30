@@ -1,391 +1,119 @@
 ---
-title: "Bot-Based Governed PR Review Workflow"
+title: "Automated Code Review Workflow"
+description: "How Agentopia's bot-based governed review workflow automates pull request reviews with policy awareness, incremental re-review, and full auditability."
 ---
 
-# Bot-Based Governed PR Review Workflow
+# Automated Code Review Workflow
 
-> Product architecture for an Agentopia-native pull request review workflow.
-> Execution actor: QA reviewer bot inside Agentopia.
-> Last updated: 2026-03-28
-
----
-
-## 1. Purpose
-
-Agentopia should not ship a second, parallel review engine inside `bot-config-api`.
-
-The intended product shape is:
-- GitHub PR events trigger a governed workflow
-- Agentopia platform handles intake, onboarding, dedupe, orchestration, and audit
-- a QA reviewer bot performs the review using existing GitHub governance tools
-- the system persists review state and verifies completion
-
-This keeps governed PR review consistent with the current Agentopia bot model.
+Agentopia provides automated pull request reviews through a governed bot workflow. A dedicated reviewer bot inspects code changes, applies repository-specific review policies, and publishes structured feedback directly on the pull request.
 
 ---
 
-## 2. Product Positioning
+## How It Works
 
-### 2.1 What this feature is
+When a pull request is opened or updated, the platform receives the event and orchestrates a review through these steps:
 
-Agentopia PR Review is a bot-based governed review workflow with:
-- GitHub-triggered intake
-- repo-aware review policy
-- governed reviewer permissions
-- incremental re-review on PR updates
-- persistent run tracking and auditability
-- low-noise, structured review output
+1. **Event intake** — The platform receives the PR event, validates the repository is onboarded, and deduplicates repeated triggers.
+2. **Review run creation** — A persistent review run is created, linked to any prior reviews on the same pull request.
+3. **Context assembly** — The platform fetches changed files, applies the repository's review policy, and packages everything the reviewer needs.
+4. **Bot dispatch** — The review package is sent to a QA reviewer bot bound to that repository.
+5. **Review execution** — The reviewer bot inspects the code, reasons over changes against the review policy, and publishes its review on GitHub.
+6. **Completion verification** — The platform confirms the review was posted and records the outcome.
 
-### 2.2 What this feature is not
-
-It is not:
-- a generic AI comment bot
-- a backend-only review engine
-- an auto-approve or auto-merge system
-- a style-only nitpick tool
-- a replacement for human ownership or release gates
-
-### 2.3 Differentiators vs Copilot / CodeRabbit
-
-The differentiators remain essential:
-1. governed permissions
-2. repo-aware policy
-3. multi-lane review
-4. incremental re-review
-5. persistence and audit
-6. low-noise synthesis
-
-The correction is architectural:
-- these differentiators must be implemented through a bot-based review workflow
-- not through a separate service-side LLM review engine inside `bot-config-api`
-
----
-
-## 3. Core Requirement
-
-The QA reviewer bot is the execution actor.
-
-Correct execution model:
-1. GitHub PR event is received
-2. Agentopia intake validates onboarding and dedupes the event
-3. Agentopia creates or updates a persisted review run
-4. Agentopia dispatches a review task to a QA reviewer bot
-5. the QA reviewer bot uses existing GitHub QA governance tools to inspect the PR
-6. the QA reviewer bot publishes the PR review to GitHub
-7. Agentopia verifies completion and persists the final result
-
-This feature must extend the current bot workflow model, not bypass it.
-
----
-
-## 4. Architecture Overview
-
-```mermaid
-graph TB
-    GH["GitHub PR Event\nopened / synchronize / reopened / ready_for_review"]
-    ACT["Repo-local GitHub Action\n(or future GitHub App intake)"]
-    INTAKE["Review Intake Endpoint"]
-    ONBOARD["Repo Onboarding + Binding"]
-    RUNS[("Review Run Store")]
-    ORCH["Review Orchestrator"]
-    CTX["Context Builder + Policy Loader"]
-    PKG["Review Request Package"]
-    BOT["QA Reviewer Bot"]
-    GOV["GitHub QA Governance Tools\ngov_get_pr_files\ngov_get_file_contents\ngov_get_pr_status\ngov_create_pr_review"]
-    VERIFY["Completion Verifier"]
-    OPS["Agentopia Ops / Audit Surface"]
-
-    GH --> ACT
-    ACT --> INTAKE
-    INTAKE --> ONBOARD
-    INTAKE --> RUNS
-    INTAKE --> ORCH
-    ORCH --> CTX
-    CTX --> PKG
-    PKG --> BOT
-    BOT --> GOV
-    GOV --> VERIFY
-    VERIFY --> RUNS
-    RUNS --> OPS
+```
+PR Event → Intake → Run Tracking → Context Assembly → Reviewer Bot → GitHub Review → Verification
 ```
 
 ---
 
-## 5. Execution Planes
+## Reviewer Bot
 
-### 5.1 Control Plane — Agentopia platform
+The reviewer bot is the execution actor. It receives a structured review package from the platform and uses governed tools to:
 
-Control-plane responsibilities:
-- GitHub intake
-- repo onboarding
-- repo-to-reviewer-bot binding
-- dedupe and review-run lifecycle
-- policy loading
-- context packaging
-- dispatching review task to reviewer bot
-- completion verification
-- audit/query APIs
+- Read changed files and their full context
+- Evaluate changes against the repository's review policy
+- Organize findings by review concern (security, schema changes, API behavior, operations)
+- Publish a single, concise review with a clear verdict
 
-Primary home:
-- `bot-config-api`
-
-### 5.2 Execution Plane — QA reviewer bot
-
-Execution-plane responsibilities:
-- inspect PR using governed GitHub tools
-- reason over code and policy
-- apply review lanes logically
-- synthesize low-noise findings
-- publish review back to GitHub
-
-Primary actor:
-- reviewer bot in Agentopia dev / target environment
-
-### 5.3 Repository Integration Plane
-
-Repo-side requirements:
-- GitHub Action trigger
-- `.agentopia/review-policy.yml`
-- secret to call Agentopia intake
-- optional future GitHub App installation path
+The bot operates within scoped permissions. It can read repository contents and submit reviews, but cannot approve, merge, or modify code.
 
 ---
 
-## 6. Core Components
+## Repository Review Policy
 
-### 6.1 GitHub Intake
+Each onboarded repository includes a review policy that shapes how the bot conducts its review. The policy can specify:
 
-Responsibilities:
-- accept PR lifecycle events
-- validate repo onboarding
-- reject unsupported events
-- create dedupe key using `repo + pr + head_sha`
-- create or update review run record
-- hand off to the orchestrator
+- **Technology stack context** so the reviewer understands the codebase
+- **Paths to ignore** (generated files, vendored dependencies)
+- **High-risk patterns** that warrant extra scrutiny
+- **Severity guidance** for different types of findings
+- **Review focus areas** to prioritize what matters most
+- **Comment limits** to keep feedback actionable, not noisy
 
-### 6.2 Repo Onboarding and Reviewer Binding
-
-Responsibilities:
-- record onboarded repositories
-- bind each onboarded repository to a reviewer bot actor
-- persist policy location / repo metadata
-- support future onboarding of additional repos without architecture changes
-
-Minimum persisted fields:
-- `repo_owner`
-- `repo_name`
-- `enabled`
-- `reviewer_actor_id`
-- `policy_ref`
-- `created_at`
-- `updated_at`
-
-### 6.3 Review Run Store
-
-Responsibilities:
-- persist each review run
-- link re-reviews to prior runs
-- persist final status, verdict, and failure reason
-- store GitHub review identifiers and timestamps
-
-Minimum persisted fields:
-- `review_run_id`
-- `repo_owner`
-- `repo_name`
-- `pr_number`
-- `base_sha`
-- `head_sha`
-- `event_type`
-- `status`
-- `prior_run_id`
-- `reviewer_actor_id`
-- `verdict`
-- `review_url`
-- `failure_reason`
-- `started_at`
-- `completed_at`
-
-### 6.4 Review Orchestrator
-
-Responsibilities:
-- determine first review vs re-review
-- fetch the correct reviewer binding
-- build review package for the bot
-- dispatch review request to the reviewer bot
-- coordinate completion verification
-
-The orchestrator is a workflow coordinator, not the primary review brain.
-
-### 6.5 Context Builder
-
-Responsibilities:
-- fetch PR metadata
-- fetch changed files and patches
-- apply repo policy filters
-- summarize prior findings / prior reviews for re-review
-- assemble a review request package for the reviewer bot
-
-This component improves bot context.
-It does not replace the reviewer bot.
-
-### 6.6 Repo Review Policy
-
-The repo review policy remains essential.
-
-Examples of policy influence:
-- stack hints
-- ignore paths
-- high-risk patterns
-- severity guidance
-- review lane focus
-- maximum inline comments
-- draft / large diff handling rules
-
-The policy should shape the review request sent to the QA bot.
-
-### 6.7 Reviewer Bot Contract
-
-The reviewer bot must remain the canonical executor.
-
-Required behavior:
-1. inspect changed files
-2. read relevant code
-3. evaluate against repo policy and review expectations
-4. publish review on GitHub
-5. return or expose enough state for completion verification
-
-Required GitHub tools:
-- `gov_get_pr_files`
-- `gov_get_file_contents`
-- `gov_get_pr_status` if needed
-- `gov_create_pr_review`
-
-### 6.8 Multi-Lane Review
-
-Multi-lane review remains a differentiator, but the lanes are logical review concerns inside the bot workflow.
-
-Example lanes:
-- Security/Auth
-- Schema/Migration
-- API/Behavior
-- CI/CD + Ops
-
-MVP should start with 1-2 lanes only.
-
-Important:
-- lanes do not need to be implemented as a separate backend engine
-- they can be executed as structured review protocol inside the reviewer bot
-
-### 6.9 Low-Noise Synthesis
-
-Low-noise synthesis remains a differentiator.
-
-Canonical responsibility:
-- the reviewer bot produces a concise summary and limited inline comments
-
-Platform-level constraints may still enforce:
-- max inline comment count
-- severity threshold
-- run-state dedupe
-
-### 6.10 Completion Verification
-
-Responsibilities:
-- verify that the reviewer bot actually posted a GitHub review
-- reconcile review result with the review run record
-- detect completed / failed / timed-out runs
-- support re-review tracking across PR updates
-
-MVP options:
-1. bot callback to Agentopia after review submission
-2. backend verification via GitHub API using known bot identity
+The platform loads this policy and injects it into the review package before dispatching to the bot.
 
 ---
 
-## 7. MVP Scope
+## Incremental Re-Review
 
-### 7.1 In scope
+When a pull request is updated after a review, the platform detects the new push and triggers a re-review. The re-review includes:
 
-1. repo-local GitHub Action trigger
-2. repo onboarding and reviewer binding
-3. review intake endpoint
-4. dedupe and review run persistence
-5. repo policy loading
-6. context package generation
-7. dispatch to QA reviewer bot
-8. completion verification
-9. non-blocking behavior
-10. audit/query visibility for runs
+- A summary of prior findings from the previous review
+- Only the new or changed files since the last review
+- Context about which prior issues were addressed
 
-### 7.2 Out of scope
-
-1. backend lane-review engine as canonical execution path
-2. backend direct LLM review as primary path
-3. backend direct GitHub publisher as primary path
-4. auto-approve or auto-merge
-5. required branch protection on first release
-6. GitHub App as required MVP architecture
-7. autonomous patch generation
+This prevents the reviewer from repeating itself and focuses feedback on what actually changed.
 
 ---
 
-## 8. Mapping Differentiators to the Bot-Based Model
+## What Makes This Different
 
-| Differentiator | Correct home in architecture |
+| Capability | Description |
 |---|---|
-| Governed permissions | reviewer bot role contract + GitHub QA governance tools |
-| Repo-aware policy | policy loaded by platform, injected into review request package |
-| Multi-lane review | structured review protocol executed by reviewer bot |
-| Incremental re-review | dedupe + prior-run linkage in review run store, prior context in bot request |
-| Persistence / audit | review run store + completion verification |
-| Low-noise synthesis | reviewer bot output discipline + platform comment thresholds |
+| **Governed permissions** | The reviewer bot operates within a defined role with scoped access to repository tools |
+| **Policy-aware review** | Reviews are shaped by each repository's specific policy, not generic rules |
+| **Multi-concern review** | Findings are organized by concern area (security, schema, API, ops) for clarity |
+| **Incremental re-review** | PR updates trigger focused follow-up reviews linked to prior findings |
+| **Full auditability** | Every review run is persisted with status, verdict, and traceability |
+| **Low-noise output** | Structured synthesis with comment limits produces actionable feedback, not walls of nitpicks |
 
 ---
 
-## 9. Initial Rollout
+## What This Is Not
 
-### Phase A — Architecture reset
-- align docs and issues to bot-based execution
-- stop expanding service-side review engine path
-
-### Phase B — Intake, onboarding, and run tracking
-- repo onboarding
-- reviewer binding
-- intake endpoint
-- dedupe and persistence
-
-### Phase C — Reviewer bot execution contract
-- review request payload
-- bot prompt / role contract
-- GitHub QA tool requirements
-- completion verification contract
-
-### Phase D — First onboarded repo activation
-- onboard first repo privately
-- add policy file and workflow
-- configure secrets
-- trigger real PR review
-- verify QA bot posts GitHub review
-
-### Phase E — E2E validation
-- PR opened
-- PR updated / re-review
-- duplicate trigger handling
-- failure isolation
-- audit trail verification
+- **Not an auto-approve system** — the bot reviews, humans decide
+- **Not a style linter** — it focuses on meaningful concerns, not formatting
+- **Not a replacement for human review** — it augments the process and catches what humans miss
+- **Not a generic comment bot** — reviews follow governed policy with structured output
 
 ---
 
-## 10. Architectural Guardrails
+## Architecture Summary
 
-1. There must not be two competing review architectures.
-2. `bot-config-api` must not become the primary reviewer brain.
-3. Reviewer reasoning and review publication stay in the reviewer bot flow.
-4. Platform services handle orchestration, tracking, verification, and audit.
-5. Public artifacts must not leak the hidden pilot repo name.
+The workflow separates concerns into two planes:
+
+**Platform (control plane):**
+- Event intake and deduplication
+- Repository onboarding and reviewer binding
+- Review policy loading and context packaging
+- Dispatch, completion verification, and audit
+
+**Reviewer bot (execution plane):**
+- Code inspection using governed tools
+- Reasoning over changes and policy
+- Structured finding organization
+- Review publication on GitHub
+
+This separation ensures the platform handles orchestration and tracking while the reviewer bot handles the actual code analysis. The platform never bypasses the bot to review code directly.
 
 ---
 
-## 11. Open Follow-Up
+## Repository Integration
 
-The current feature track should be re-planned to align with this architecture before further implementation continues.
+To onboard a repository:
+
+1. Add a review policy file to the repository
+2. Configure a GitHub Action to send PR events to the platform
+3. The platform binds the repository to a reviewer bot
+
+Once onboarded, every qualifying pull request is automatically reviewed with no further configuration needed.

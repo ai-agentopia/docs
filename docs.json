@@ -48,40 +48,26 @@
             "group": "System Design",
             "pages": [
               "architecture/chatbot-architecture",
-              "architecture/architecture-multiple-bot",
-              "architecture/repo-split-notes"
+              "architecture/architecture-multiple-bot"
             ]
           },
           {
-            "group": "A2A Protocol",
+            "group": "Agent Communication",
             "pages": [
-              "architecture/a2a-full-design",
-              "architecture/a2a-solution-protocol",
-              "architecture/a2a-improvement-plan",
-              "architecture/a2a-comparison"
+              "architecture/a2a-full-design"
             ]
           },
           {
-            "group": "Governed Code Review",
+            "group": "Security & Governance",
             "pages": [
-              "architecture/governed-pr-review-workflow",
-              "architecture/reviewer-remediation",
-              "architecture/reviewer-coexistence"
-            ]
-          },
-          {
-            "group": "Design Proposals",
-            "pages": [
-              "architecture/p0.5-deterministic-delivery-start",
               "architecture/p1-execution-authorization",
-              "architecture/worker-pool-routing-improvement-plan"
+              "architecture/governed-pr-review-workflow"
             ]
           },
           {
-            "group": "Decision Records",
+            "group": "Improvement Plans",
             "pages": [
-              "adrs/005-relay-deprecation-timeline",
-              "adrs/007-integrations-abstraction"
+              "architecture/worker-pool-routing-improvement-plan"
             ]
           }
         ]
@@ -101,15 +87,6 @@
             "pages": [
               "product/multi-provider-model-selection"
             ]
-          },
-          {
-            "group": "UI/UX",
-            "pages": [
-              "product/uiux-redesign-milestone",
-              "product/uiux-dev-handoff",
-              "product/uiux-layout-spec",
-              "product/uiux-issues"
-            ]
           }
         ]
       },
@@ -120,25 +97,6 @@
             "group": "Roadmap",
             "pages": [
               "roadmap"
-            ]
-          },
-          {
-            "group": "Milestone Traces",
-            "pages": [
-              "milestones/p1-web-app-primary-dual-lane-mvp",
-              "milestones/m6.2-deterministic-delivery"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Operations",
-        "groups": [
-          {
-            "group": "Contracts",
-            "pages": [
-              "operations/cicd-contract",
-              "operations/documentation-governance"
             ]
           }
         ]
