@@ -57,20 +57,29 @@ What Agentopia can do today, and where it's headed.
 
 ## In Progress
 
-### P1 — Web-App Primary Dual-Lane MVP
+### SA Knowledge Base for Domain & Project Intelligence
 
-Completing the web-app-primary product with explicit execution boundaries.
+Enabling SA bots to use client-provided domain and project knowledge as a reliable working brain. Production-facing initiative with structured debate phase before implementation.
 
-| Item | Status |
+| Capability | Description |
 |---|---|
-| Auth session layer | Implemented |
-| Communication API + UI | Implemented |
-| Workflow API + UI | Implemented |
-| Boundary 1 — Workflow UI as only delivery start path | Implemented |
-| Boundary 3 — Sidecar execution class propagation | Code-traced, pending runtime verification |
-| Workflow conversation API | Implemented |
-| Workflow conversation frontend | In progress |
-| E2E proof (5 scenarios) | Pending — release gate |
+| **Domain knowledge ingestion** | Ingest client documents (markdown, PDF, HTML, code) into scoped knowledge bases |
+| **Scoped retrieval** | Retrieve relevant knowledge during bot inference, isolated per scope |
+| **Provenance & citation** | Bot answers cite source documents with filename and section references |
+| **Governance** | Authenticated access, scope-level access control, audit trail |
+| **Quality evaluation** | Defined quality bar, golden test sets, answer contract for production use |
+
+**Status**: Architecture debate phase — 7 decision sessions in progress before implementation begins.
+
+Tracking doc: [SA Knowledge Base Milestone](milestones/production-sa-knowledge-base)
+
+---
+
+## Recently Completed
+
+### P1 — Web-App Primary Dual-Lane MVP (Closed 2026-03-30)
+
+Web app is the primary operator path. Dual-lane product: Communication (chat) + Workflow (delivery). Three execution boundaries enforced. Workflow conversation with live bot reply.
 
 Tracking doc: [P1 Milestone Trace](milestones/p1-web-app-primary-dual-lane-mvp)
 
