@@ -11,6 +11,31 @@
   "navigation": {
     "tabs": [
       {
+        "tab": "Platform",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "presale/overview"
+            ]
+          },
+          {
+            "group": "Capabilities",
+            "pages": [
+              "presale/capabilities",
+              "presale/use-cases"
+            ]
+          },
+          {
+            "group": "Technical",
+            "pages": [
+              "presale/deployment",
+              "presale/differentiators"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Architecture",
         "groups": [
           {
