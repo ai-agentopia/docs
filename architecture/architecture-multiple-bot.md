@@ -3,7 +3,6 @@ title: "Multi-Bot Architecture"
 description: "How Agentopia orchestrates multiple AI bots with shared knowledge, isolated identities, and persistent memory across conversations."
 ---
 
-# Multi-Bot Architecture
 
 Agentopia is a self-hosted AI agent gateway that routes messages to multiple AI bots. Each bot has its own identity, model, and role, but shares a common knowledge base and memory infrastructure.
 

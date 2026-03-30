@@ -2,7 +2,6 @@
 title: "Worker Pool Routing Improvement Plan"
 ---
 
-# Worker Pool Routing Improvement Plan
 
 **Status**: Improvement plan — not yet implemented end-to-end
 **Date**: 2026-03-30

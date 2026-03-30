@@ -3,7 +3,6 @@ title: "Agentopia Platform Architecture"
 description: "Technical architecture of the Agentopia multi-bot AI platform — automated bot provisioning, persistent memory, multi-channel messaging, and extensible plugin system."
 ---
 
-# Agentopia Platform Architecture
 
 Agentopia is a self-hosted AI chatbot platform that lets organizations deploy multiple specialized AI bots with shared knowledge, long-term memory, and GitOps-native infrastructure on Kubernetes.
 

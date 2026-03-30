@@ -3,7 +3,6 @@ title: "Agentopia API Server"
 description: "Central API server powering bot lifecycle management, multi-agent collaboration, and delivery orchestration for the Agentopia platform."
 ---
 
-# Agentopia API Server
 
 The Agentopia API Server is the control plane for the platform. It handles bot provisioning, inter-agent communication, collaborative reasoning threads, workflow orchestration, and credential governance -- all through a single, unified API surface.
 

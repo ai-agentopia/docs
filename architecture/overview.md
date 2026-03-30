@@ -3,7 +3,6 @@ title: "Architecture Overview"
 description: "High-level architecture of the Agentopia autonomous multi-bot delivery platform"
 ---
 
-# Architecture Overview
 
 Agentopia is an autonomous multi-bot delivery platform. It orchestrates teams of AI agents — orchestrators, workers, and reviewers — to plan, build, review, and merge software changes with minimal human intervention.
 

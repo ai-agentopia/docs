@@ -3,7 +3,6 @@ title: "Automated Code Review Workflow"
 description: "How Agentopia's bot-based governed review workflow automates pull request reviews with policy awareness, incremental re-review, and full auditability."
 ---
 
-# Automated Code Review Workflow
 
 Agentopia provides automated pull request reviews through a governed bot workflow. A dedicated reviewer bot inspects code changes, applies repository-specific review policies, and publishes structured feedback directly on the pull request.
 

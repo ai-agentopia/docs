@@ -3,7 +3,6 @@ title: "Execution Authorization"
 description: "Dual-lane security model that separates consultation from delivery through deterministic execution authorization, ensuring delivery actions only occur within trusted workflow contexts."
 ---
 
-# Execution Authorization
 
 ## Problem
 

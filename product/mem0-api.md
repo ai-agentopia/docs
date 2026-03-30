@@ -3,7 +3,6 @@ title: "Semantic Memory System"
 description: "Agentopia's built-in memory layer that lets agents learn, remember, and personalize conversations over time."
 ---
 
-# Semantic Memory System
 
 Agentopia includes a semantic memory layer that gives every agent the ability to remember facts, preferences, and context across conversations. Memories are extracted automatically from conversations and recalled when relevant, making each interaction more personalized.
 

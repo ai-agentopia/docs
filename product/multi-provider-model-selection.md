@@ -3,7 +3,6 @@ title: "Multi-Provider Model Selection"
 description: "Run different AI models per agent — mix providers for cost, capability, and resilience"
 ---
 
-# Multi-Provider Model Selection
 
 Each Agentopia agent can use a different LLM provider and model. A team can include an orchestrator on Claude Opus for deep reasoning, workers on Claude Sonnet for cost efficiency, and a reviewer on a different provider entirely.
 

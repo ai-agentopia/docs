@@ -2,7 +2,7 @@
 title: "P1: Web-App Primary Dual-Lane MVP"
 ---
 
-# P1: Web-App Primary Dual-Lane MVP
+
 
 **Status**: In execution — Wave 1 (#258, #259) + Wave 2 (#257, #290) active
 **Date**: 2026-03-30

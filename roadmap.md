@@ -3,7 +3,6 @@ title: "Roadmap"
 description: "Agentopia platform capabilities — shipped and planned"
 ---
 
-# Roadmap
 
 What Agentopia can do today, and where it's headed.
 
