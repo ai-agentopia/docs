@@ -1,0 +1,140 @@
+---
+title: "Platform Capabilities"
+description: "What Agentopia delivers — by business domain"
+---
+
+# Platform Capabilities
+
+## Autonomous Software Delivery
+
+Agentopia's delivery workflow takes a natural-language objective and produces a complete, reviewed pull request — without manual intervention between steps.
+
+### What the platform does
+
+| Phase | Agent | Output |
+|---|---|---|
+| **Planning** | Solution Architect | GitHub milestone, issues, work breakdown |
+| **Development** | Developer Agent | Feature branch, code implementation, pull request |
+| **Code Review** | Reviewer Agent | Structured PR review with severity-tagged findings |
+| **Quality Gate** | QA Analyst | Approve or request changes with evidence |
+| **Merge & Close** | Orchestrator | PR merged, issue closed, milestone updated |
+
+### Delivery pipeline features
+
+- **Deterministic state machine** — every workflow progresses through well-defined phases (Plan, Dev, Review, Merge, Done) with no ambiguous intermediate states
+- **Rework loop** — if the reviewer finds issues, the developer agent automatically receives feedback and iterates
+- **Webhook integration** — GitHub events (PR merged, review submitted) automatically advance the workflow
+- **Idempotent delivery start** — duplicate requests produce the same workflow, not duplicates
+- **Real-time tracking** — operators see live workflow status, phase timeline, and artifacts through the web UI
+
+---
+
+## Multi-Agent Team Management
+
+### Specialized AI agents
+
+Each Agentopia bot is a purpose-built AI agent with its own identity, expertise, and behavioral contract:
+
+| Role | Responsibility | Example |
+|---|---|---|
+| **Solution Architect** | Plans delivery, coordinates team, manages milestones | Kevin-SA: orchestrates backend and frontend delivery |
+| **Developer** | Writes code, creates branches, opens PRs | Max-Backend: specializes in API and backend systems |
+| **Code Reviewer** | Reviews PRs for security, quality, and architecture | Kia-QA: structured review with severity classification |
+| **SCM Reviewer** | Repository-specific automated review on every PR | Demo-Reviewer: bound to a specific GitHub repository |
+
+### Agent provisioning
+
+- **Natural language setup** — describe the agent's role, expertise, and personality in plain language
+- **Automatic identity generation** — SOUL (identity) and configuration files generated from requirements
+- **Multi-provider model selection** — each agent can use a different LLM provider (Anthropic Claude, OpenAI, Fireworks AI, OpenRouter)
+- **One-click deployment** — from description to running agent in minutes
+
+---
+
+## Governed Execution
+
+Agentopia enforces strict boundaries on what each agent can do, preventing unauthorized actions regardless of LLM behavior.
+
+### Execution authorization model
+
+| Agent Role | Can Read Code | Can Write Code | Can Review PRs | Can Merge PRs |
+|---|---|---|---|---|
+| Solution Architect | Yes | No | No | Yes |
+| Developer | Yes | Only in workflow context | No | No |
+| Code Reviewer | Yes | No | Only in workflow context | No |
+
+### Key governance features
+
+- **Execution class enforcement** — write operations only allowed during active workflow dispatch, never from casual chat
+- **Role-based tool access** — 28 GitHub governance tools classified by role authorization
+- **Delivery start boundary** — workflows can only be started through the operator UI, not by the AI model autonomously
+- **Audit trail** — every tool call, authorization decision, and state transition is logged
+
+---
+
+## Dual-Lane Operator Interface
+
+Agentopia provides two distinct interaction modes through its web application:
+
+### Communication Lane
+Direct conversation with any agent for consultation, brainstorming, and status checks. Agents can answer questions, discuss approaches, and provide expert analysis — without triggering delivery actions.
+
+### Workflow Lane
+Structured delivery management: start workflows, track progress through phase timelines, view generated artifacts (branches, PRs, reviews), and participate in workflow-scoped conversations.
+
+### Key UI features
+
+- **Bot sidebar** — quick access to all deployed agents with role badges
+- **Phase timeline** — visual progress tracking (Plan → Dev → Review → Merge → Done)
+- **Artifact panel** — direct links to generated branches, PRs, and reviews
+- **Workflow conversation** — contextual messaging within each delivery workflow
+- **Planning board sync** — Trello integration for stakeholder visibility
+
+---
+
+## Intelligent Code Review
+
+Agentopia's review system provides structured, evidence-based code review at two levels:
+
+### Workflow review (QA gate)
+- Dispatched automatically as part of the delivery workflow
+- Reviews against acceptance criteria defined in the work assignment
+- Produces structured findings with severity classification
+- Approves or requests changes — blocking merge until resolved
+
+### Repository-bound review (SCM gate)
+- Triggered automatically on every PR via GitHub Actions
+- Bound to a specific repository for continuous review coverage
+- Independent from delivery workflows — works on any PR, not just Agentopia-created ones
+- Coexists cleanly with workflow reviewers (no dispatch ambiguity)
+
+### Review output structure
+
+Each review produces:
+- **Verdict**: APPROVE or REQUEST_CHANGES
+- **Findings**: categorized by type (security, schema, API, operational)
+- **Severity**: tagged per finding for prioritization
+- **Evidence**: file paths, line numbers, code references
+- **Suggested fixes**: actionable remediation where applicable
+
+---
+
+## Agent-to-Agent Collaboration
+
+Agentopia agents communicate through the A2A (Agent-to-Agent) protocol for multi-domain problem solving:
+
+- **Consultation threads** — orchestrator creates discussion threads with relevant specialists
+- **Specialist discovery** — agents discover available teammates and their expertise dynamically
+- **Relay communication** — bot-to-bot messaging for questions, brainstorming, and coordination
+- **Domain-specific routing** — questions are directed to the most relevant specialist
+
+---
+
+## Memory & Context Persistence
+
+Every agent maintains persistent memory across conversations and sessions:
+
+- **Semantic memory** — vector-based search (Qdrant) for relevant past context
+- **Entity graph** — relationship mapping (Neo4j) for understanding connections
+- **File-based workspace** — persistent storage per agent for accumulated knowledge
+- **Cross-session continuity** — agents remember past interactions, decisions, and preferences

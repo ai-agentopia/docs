@@ -1,0 +1,53 @@
+---
+title: "Why Agentopia"
+description: "What makes Agentopia different from AI coding assistants"
+---
+
+# Why Agentopia
+
+## Beyond AI Coding Assistants
+
+Most AI tools today are **single-agent assistants** — they help one developer write code faster. Agentopia is different: it deploys a **governed team of specialized AI agents** that collaborate to deliver software autonomously.
+
+| | AI Coding Assistant | Agentopia |
+|---|---|---|
+| **Scope** | Individual code suggestions | End-to-end delivery workflow |
+| **Agents** | One general-purpose | Multiple specialized (SA, Dev, QA) |
+| **Coordination** | None — human coordinates | Agent-to-agent protocol |
+| **Governance** | Trust the model | Enforce via execution authorization |
+| **Persistence** | Session-only | Durable workflows, persistent memory |
+| **Output** | Code snippets | Branches, PRs, reviews, milestones |
+| **Audit** | None | Every action logged and traceable |
+| **Customization** | Prompt tweaks | Purpose-built agents with identity and expertise |
+
+---
+
+## Key Differentiators
+
+### 1. Governed, Not Just Prompted
+
+Agentopia does not rely on prompt compliance for security. The execution authorization matrix enforces what each agent can do at the runtime level — write tools are physically blocked outside workflow context, regardless of what the LLM tries to do.
+
+### 2. Specialized, Not Generic
+
+Each agent has a distinct role, expertise, and behavioral contract. A code reviewer behaves differently from a developer — not because of a system prompt alone, but because governance tools, execution boundaries, and workflow dispatch paths are structurally different per role.
+
+### 3. Durable, Not Ephemeral
+
+Workflows survive pod restarts, network interruptions, and LLM failures. Temporal-based state machines provide exactly-once execution semantics. Agent memory persists across sessions. Nothing is lost when a conversation ends.
+
+### 4. Observable, Not Black-Box
+
+Every workflow phase transition, tool call, authorization decision, and artifact creation is logged and visible through the web UI. Operators see exactly what happened, when, and why — not just the final output.
+
+### 5. Composable Teams
+
+Need a security specialist? Deploy one. Need a frontend developer alongside a backend developer? Deploy both. Teams scale by adding purpose-built agents — each with its own model, provider, expertise, and cost profile.
+
+### 6. Provider-Agnostic
+
+Each agent can use a different LLM provider. Run your orchestrator on Claude Opus for deep reasoning, workers on Claude Sonnet for speed, and reviewers on Fireworks Kimi for cost optimization. Switch providers per-agent without changing architecture.
+
+### 7. Infrastructure-Agnostic
+
+Kubernetes-native, open-source dependencies, no vendor lock-in. Deploy on AWS, GCP, Azure, or on-premises bare metal. Same architecture everywhere.
