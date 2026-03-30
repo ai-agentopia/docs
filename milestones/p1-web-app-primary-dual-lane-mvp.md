@@ -253,9 +253,13 @@ Complex graph branching, LLM-driven routing, multi-packet parallel delivery, mul
 ### Wave 1 — Boundary blockers
 
 #### #258 Boundary 1 — Remove start_delivery
-- `gateway/extensions/wf-bridge/index.ts`: `start_delivery` tool removed; `before_agent_start` hint updated to route `/wf start` → `wf_command` or inform user to use Workflow UI
-- `bot-config-api/src/prompts/bot_prompts.py`: `DELIVERY_TEMPLATES["orchestrator"]` updated — no start_delivery reference; SYSTEM_PROMPT Hard Rules updated; `build_a2a_section()` updated
-- **Evidence level**: Implemented in code (PR pending)
+- `gateway/extensions/wf-bridge/index.ts`: `start_delivery` tool registration removed. `/wf start` hook returns "use Workflow UI" message.
+- `bot-config-api/src/prompts/bot_prompts.py`: orchestrator DELIVERY_TEMPLATES, SYSTEM_PROMPT Hard Rules, `build_a2a_section()` all updated — no positive `start_delivery` instruction remains.
+- `bot-config-api/src/routers/activation.py`: role marker and comments cleaned.
+- `wf-bridge.test.ts`: regression test replaced with Boundary 1 removal assertion.
+- `test_llm_generator.py`: orchestrator A2A assertion updated.
+- `test_delivery_templates.py`: 3 tests updated to assert Boundary 1 contract.
+- **Evidence level**: Structurally validated — tests assert tool is absent from source, prompt contains no positive instruction, stale references cleaned across active code/tests/comments.
 
 #### #259 Boundary 3 — executionClass propagation
 - **Code-traced propagation chain** (verified 2026-03-30):
@@ -274,16 +278,17 @@ Complex graph branching, LLM-driven routing, multi-packet parallel delivery, mul
 - `bot-config-api/db/021_workflow_messages.sql`: new `workflow_messages` table
 - `bot-config-api/src/routers/workflow_conversations.py`: `POST /api/v1/workflows/{id}/messages`, `GET /api/v1/workflows/{id}/messages`
 - `bot-config-api/src/main.py`: router registered
-- `bot-config-api/src/tests/test_workflow_conversations.py`: model validation, route registration, scope boundary tests
-- **Scope**: Persisted message thread only. No context injection, no SSE, no LLM prompting.
-- **Evidence level**: Implemented in code, partially validated (tests pass)
+- `bot-config-api/src/tests/test_workflow_conversations.py`: 22 tests — model validation, route registration, scope boundaries, handler behavior via mock pool (create/list/404/503)
+- **P1 scope decision (Option A)**: Persisted message thread only. No context injection, no SSE, no LLM prompting. Full conversation loop is deferred (Wave F).
+- **Evidence level**: Behaviorally validated (backend) — handler logic exercised through mock pool: create returns correct shape, 404 for missing workflow, 503 without DB, list returns messages in order, auth guard verified.
 
 #### #290 Workflow conversation frontend
-- `agentopia-ui/src/components/workflow/WorkflowConversation.tsx`: new component — message list + composer. REST + React Query polling (10s), NOT WebSocket.
+- `agentopia-ui/src/components/workflow/WorkflowConversation.tsx`: message list + composer. REST + React Query polling (10s), NOT WebSocket.
 - `agentopia-ui/src/components/workflow/WorkflowDetail.tsx`: Conversation section added between Artifacts and Trello.
-- `agentopia-ui/src/hooks/useWorkflows.ts`: `useWorkflowMessages` hook added (React Query, GET /workflows/{id}/messages).
-- **Scope**: Persisted workflow-scoped message thread only. NOT a real-time conversation loop with LLM orchestrator behavior. No bot is prompted via this surface.
-- **Evidence level**: Implemented in code, partially validated (scope tests pass)
+- `agentopia-ui/src/hooks/useWorkflows.ts`: `useWorkflowMessages` hook (React Query, GET /workflows/{id}/messages).
+- `agentopia-ui/src/__tests__/workflow-conversation.test.ts`: 16 tests — export checks, source-level scope boundary enforcement, WorkflowDetail integration checks, message rendering contract checks.
+- **P1 scope decision (Option A)**: Persisted message thread UI. NOT a real-time conversation loop. No bot is prompted via this surface.
+- **Evidence level**: Structurally validated with limited behavioral coverage (frontend) — tests verify imports, scope boundaries (no WS, no conversation-store), integration wiring, and rendering contract via source inspection. No DOM render tests or user interaction simulation.
 
 ### Wave 3 — Doc alignment
 
@@ -302,10 +307,29 @@ Not yet started. Requires all Wave 1–3 work deployed to dev. Gate criteria:
 4. Workflow conversation panel works (send message, receive response, separate from comm lane)
 5. Worker/reviewer bot governance tool call during sidecar dispatch shows `executionClass=workflow_dispatch` in logs
 
-## 12. Milestone Decision
+## 12. Scope Decision: Workflow Conversation
 
-P1 is **in progress**. Boundary 1 (#258) is cleaned, workflow conversation (#257/#290) delivers a persisted message thread (minimal viable scope), executionClass (#259) is code-traced but not runtime-proven.
+**Option A accepted**: Minimal persisted workflow-scoped message thread is sufficient for P1.
 
-**Not code-complete yet.** #257/#290 delivers only a persisted message thread — the full workflow conversation behavior (context injection, LLM orchestrator prompting, SSE streaming) is deferred scope. #259 requires runtime verification.
+**Rationale**: P1's objective is "web app primary, workflow lane with workflow-scoped conversation." Communication lane already provides live orchestrator chat. The workflow conversation panel adds a distinct message surface scoped to a specific delivery workflow. A full orchestrator reply loop (context injection, LLM prompting, streaming) is Wave F scope.
+
+**What is accepted for P1**: REST API for create/list messages, React Query polling, message panel in WorkflowDetail. Separate from Communication lane.
+
+**What is deferred**: Context injection (workflow state as system prompt), SSE streaming, LLM orchestrator prompting through workflow panel.
+
+## 13. Milestone Decision
+
+P1 scope is fixed. Implementation status:
+- **#258**: Structurally validated — Boundary 1 enforced, stale contract cleaned
+- **#257**: Behaviorally validated (backend) — minimal persisted thread, handler logic exercised
+- **#290**: Structurally validated with limited behavioral coverage (frontend) — component exists, scope boundaries verified, no DOM render tests
+- **#259**: Code-traced — propagation chain verified across both repos, runtime proof pending
+- **#263**: Substantially complete — key docs updated, minor stale refs in pre-P1 design docs not blocking
+- **#264**: Not started — blocked on deploy
+
+**Remaining blockers are runtime/deploy only:**
+1. Deploy to dev
+2. Verify #259 via `[P1-DEBUG-GOV]` logs
+3. Execute #264 E2E scenarios
 
 P1 is **not release-ready** until #264 evidence is attached.

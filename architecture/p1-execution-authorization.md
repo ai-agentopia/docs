@@ -15,7 +15,7 @@ Agentopia's relay/A2A mechanism is semantically overloaded. The same tools can b
 - **Consultation:** "What do you think about this approach?"
 - **Delivery delegation:** "Create a branch and implement this feature"
 
-This makes delivery correctness depend on LLM prompt compliance rather than deterministic policy enforcement. A weaker model (or even a strong model on a bad day) can bypass the workflow by directly delegating delivery work via relay instead of using the canonical `start_delivery` path.
+This makes delivery correctness depend on LLM prompt compliance rather than deterministic policy enforcement. A weaker model (or even a strong model on a bad day) can bypass the workflow by directly delegating delivery work via relay instead of using the proper delivery-start path.
 
 The architecture must separate consultation from delivery enforcement by **execution-level authorization**, not by prompt guidance alone.
 
@@ -70,7 +70,7 @@ Every request to the agent execution engine is classified into exactly one execu
 The system supports two semantic lanes:
 
 - **Lane A — Consultation:** Bot-to-bot questions, brainstorming, status discussion, specialist consultation. No delivery artifacts created. Uses `consultation_read` tools.
-- **Lane B — Delivery:** Build/fix/change code in repository. Canonical entrypoint: `start_delivery`. Workflow/state machine owns sequencing. Uses `execution_write` and `review_write` tools.
+- **Lane B — Delivery:** Build/fix/change code in repository. Canonical entrypoint: Workflow UI form → `POST /api/v1/delivery/start`. Workflow/state machine owns sequencing. Uses `execution_write` and `review_write` tools. The `start_delivery` model tool has been removed from the bot surface (Boundary 1, #258).
 
 Lane selection is a UX/semantic concern. Lane enforcement is an execution authorization concern. The authorization matrix (section 2.3) is the hard boundary, not lane detection.
 
@@ -155,9 +155,9 @@ Runtime verification requires: deploy to dev → trigger sidecar dispatch → ch
 
 P1 enables the **execution-safe dual-lane model**:
 - After P1: A2A consultation reads are OK, delivery writes denied without active workflow dispatch
-- After P1: orchestrator can freely use relay for consultation while delivery is enforced through `start_delivery`
-- **Start-path integrity NOT solved by P1** — orchestrator can still be prompted to bypass `start_delivery` via creative user input. This is an accepted gap until gateway fork (milestone #25) enables deterministic Telegram routing
-- P1 is the **active enforcement milestone**. It is NOT "production-grade start-path architecture" — that requires gateway fork
+- After P1: orchestrator can freely use relay for consultation. Delivery starts only from Workflow UI form.
+- **Start-path integrity**: `start_delivery` tool removed from model surface (Boundary 1). The only delivery-start path is the Workflow UI form calling `POST /api/v1/delivery/start`. The model cannot initiate delivery from chat.
+- P1 is the **active enforcement milestone** for execution authorization boundaries.
 
 ---
 
