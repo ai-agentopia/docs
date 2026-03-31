@@ -5,107 +5,64 @@ description: "Formal debate on production-ready Super RAG for Agentopia. Grounde
 
 # Super RAG — CTO Debate Session
 
-> **Date**: 2026-03-31
+> **Date**: 2026-03-31 (revised after CTO pushback)
 > **Participants**: CTO, Platform/DevOps
 > **Status**: READY_FOR_CTO_REVIEW
 > **Assumption**: English-first production. Vietnamese/multilingual is optional enhancement.
+> **Revision**: v2 — fixes evaluation logic, demotes Contextual Retrieval, honest current-state labels, separates evidence types, adds service architecture assessment
 
 ---
 
 ## A. Current State Assessment
 
-### What Exists Today (Proven)
+### What Exists Today
 
-| Component | Evidence | Production-Ready? |
+| Component | Evidence (repo) | Readiness |
 |---|---|---|
-| **Scoped knowledge model** | `{client_id}/{scope_name}`, collection-per-scope in Qdrant, server-side bot→scope resolution | Yes |
-| **Authenticated knowledge routes** | Dual-path: operator session + bot bearer. 18 auth tests passing. | Yes |
-| **File-upload ingestion** | PDF/HTML/Markdown/code parsing, 3 chunking strategies, SHA-256 dedup, two-phase atomic replace | Yes |
-| **Postgres document lifecycle** | `document_records` table: active/superseded/deleted states, tombstone ledger | Yes |
-| **Provenance & citations** | Source, section, page, chunk_index, score, ingested_at, document_hash — 35 provenance tests | Yes |
-| **Runtime retrieval plugin** | Gateway extension (priority 10), 5s timeout, non-blocking, XML injection with D7 answer contract | Yes (with config fix needed) |
-| **Vector search** | Qdrant v1.16.1, `qwen/qwen3-embedding-8b` (1024d), cosine similarity, topK=5 | Yes |
-| **Memory system** | mem0-api: Qdrant (semantic) + Neo4j (graph), separate from knowledge | Yes |
-| **Operator Knowledge UI** | Client-first navigation, scope browser, upload/delete/search | Yes |
-| **Evaluation framework** | ADR-014: 8 criteria (3 hard at 100%), 6 scenario types, 7 evaluation artifacts created | Design + artifacts, not automated |
-| **Test suite** | 150+ knowledge-specific tests, 2,494 total bot-config-api tests | Yes |
+| **Scoped knowledge model** | `{client_id}/{scope_name}`, collection-per-scope in Qdrant, server-side bot→scope resolution. 18 auth tests. | **Implemented** — code complete, tested |
+| **File-upload ingestion** | PDF/HTML/Markdown/code parsing, 3 chunking strategies, SHA-256 dedup, two-phase atomic replace | **Implemented** — production-grade patterns |
+| **Postgres document lifecycle** | `document_records` table: active/superseded/deleted states, tombstone ledger | **Implemented** — tested |
+| **Provenance & citations** | Source, section, page, chunk_index, score, ingested_at, document_hash — 35 provenance tests | **Implemented** — tested |
+| **Runtime retrieval plugin** | Gateway extension (priority 10), 5s timeout, non-blocking, XML injection with D7 answer contract | **Production-pending** — Helm config gap silently disables plugin (F0.1) |
+| **Vector search** | Qdrant v1.16.1, `qwen/qwen3-embedding-8b` (1024d), cosine similarity, topK=5 | **Operationally present** — works, but no retry/circuit breaker on embedding API |
+| **Memory system** | mem0-api: Qdrant (semantic) + Neo4j (graph), separate from knowledge | **Operationally present** — running, patched for Neo4j edge cases |
+| **Operator Knowledge UI** | Client-first navigation, scope browser, upload/delete/search | **Implemented** — tested |
+| **Evaluation framework** | ADR-014: 8 criteria (3 hard at 100%), 6 scenario types, 7 evaluation artifacts, 22 contract tests | **Design-complete, automation-pending** — no retrieval quality metrics yet |
+| **Test suite** | 150+ knowledge-specific tests, 2,494 total bot-config-api tests | **Implemented** — covers contracts, not retrieval quality |
+| **Live pilot gate** | #307 OPEN — requires real client documents + manual evaluation | **Blocked** — business dependency on first client |
 
-### What Works Well
+### What Works Well (repo-proven)
 
-1. **Ingestion pipeline is solid** — Two-phase atomic replace, hash-based dedup, tombstone lifecycle. This is not MVP-quality, it's production-grade data management. No need to touch it.
+1. **Ingestion pipeline** — Two-phase atomic replace, hash-based dedup, tombstone lifecycle. Enterprise-grade data management. Tested.
+2. **Scope isolation** — Server-side resolution, zero cross-scope leakage. ADR-008/009 locked. Tested.
+3. **Non-blocking retrieval** — Gateway plugin times out gracefully. Bot always answers. Correct architecture.
+4. **Evaluation design** — ADR-014 defines 8 concrete criteria with thresholds. 3 hard requirements automated. ~60% complete (design + contract tests), not 0%.
 
-2. **Scope isolation is proven** — Server-side resolution, zero cross-scope leakage tested. ADR-008/009 are locked and validated.
+### What Is Weak (honest)
 
-3. **Non-blocking retrieval design** — Gateway plugin times out gracefully. Bot always answers. This is the right architecture — knowledge enhances answers, never blocks them.
-
-4. **Evaluation framework is well-designed** — ADR-014 defines concrete criteria with thresholds. 3 hard requirements (100% scope isolation, zero fabricated citations, always disclose unavailability) are already automated in tests.
-
-### What Is Weak (Honest)
-
-1. **Retrieval quality is unoptimized** — Pure vector search with no reranking, no hybrid. Top-5 results rely entirely on embedding quality. For English technical docs, this may be sufficient. But we have no data to prove it.
-
-2. **No production quality measurement** — Evaluation framework exists as design + test artifacts, but no retrieval quality metrics (nDCG, MRR) and no automated regression. We literally cannot answer "how good is our retrieval?"
-
-3. **Configuration fragility** — Knowledge retrieval plugin config is NOT properly exposed in Helm configmap-config.yaml. Plugin silently disables if apiUrl not set. Embedding timeout hardcoded at 30s. No retry/circuit breaker on OpenRouter API.
-
-4. **No observability** — Zero retrieval-specific metrics. No latency tracking, no cache hit rate, no result quality histogram. Cannot diagnose retrieval issues in production.
-
-5. **Live pilot gate still open** — #307 blocks production deployment. Requires real client documents + manual evaluation.
+1. **Retrieval quality is unmeasured** — Pure vector search, no hybrid, no reranking. No data on whether top-5 results are actually relevant.
+2. **No quality metrics** — Cannot answer "how good is our retrieval?" No nDCG, MRR, or faithfulness measurement.
+3. **Configuration fragility** — Plugin Helm config gap, hardcoded embedding timeout (30s), no retry/circuit breaker.
+4. **No observability** — Zero retrieval-specific metrics. Cannot diagnose production issues.
+5. **Monolithic knowledge service** — All RAG logic (ingestion, embedding, search, lifecycle) lives inside `bot-config-api`. See Section J for analysis.
 
 ---
 
 ## B. Critical Review of Existing Blueprint
 
-The current `super-rag-blueprint.md` has several problems:
+### Problems Identified
 
-### Problems with the Blueprint
+**1. Overstates gaps**: Blueprint scored 37% by counting 60 items from a generic RAG wishlist including non-RAG items (Reasoning Engine, Tooling Layer, RLHF). Production-relevant coverage is ~55-60%.
 
-**1. Overstates gaps by comparing against generic RAG wishlist**
+**2. Underweights strengths**: Ingestion pipeline is production-grade. Evaluation framework is ~60% complete, not 0%.
 
-The blueprint scored current state at 37% by counting 60 items from a generic RAG blueprint. Many of those items are research-grade features irrelevant to production:
+**3. Graph RAG too early**: Should be explicitly deferred, not in production path.
 
-- "Reasoning Engine" (intent understanding, constraint identification, option generation) — This is not a RAG concern. This is agent design. Scoring RAG against it inflates the gap.
-- "Tooling Layer" (cost estimator, diagram generator) — Not RAG. Not relevant.
-- "Continuous Learning" (feedback loop, model improvement) — Aspirational, not production-blocking.
+**4. Missing Phase 0**: Known fragility must be fixed before quality measurement.
 
-**Corrected scope**: If we count only items that actually affect retrieval quality and production readiness, current coverage is closer to **55-60%**, not 37%.
+**5. Evaluation logic was inconsistent**: Mixed reference-free metrics (RAGAS) with labeled ranking metrics (nDCG/MRR) as if interchangeable. They are not. Fixed in this revision (see Section E).
 
-**2. Underweights current implementation strengths**
-
-The blueprint gives ingestion 92% but doesn't emphasize that this is **already production-grade**. Two-phase atomic replace, SHA-256 dedup, tombstone lifecycle — these are enterprise patterns. Most RAG systems ship without this.
-
-Similarly, evaluation framework gets 0% because "no automated pipeline exists." But ADR-014 + 22 evaluation artifact tests + 3 hard requirements automated is not 0%. It's **design-complete, automation-pending**.
-
-**3. Puts Graph RAG too early (Phase 4)**
-
-Blueprint places Graph RAG as Phase 4 — technically after retrieval quality. But the blueprint still includes it in the "production path." Graph RAG is a research enhancement that requires:
-- Entity extraction pipeline (new LLM calls per ingest)
-- Neo4j schema design for knowledge entities (separate from mem0 graph)
-- Graph traversal at query time (latency impact)
-
-**Recommendation**: Graph RAG should be **explicitly deferred** to post-production. It's not a production requirement.
-
-**4. Missing a foundation hardening phase**
-
-Blueprint jumps to "Phase 1: Evaluation" without addressing known fragility:
-- Knowledge plugin Helm config gap (silently disabled)
-- No retry/circuit breaker on embedding API
-- No Qdrant health check
-- Hardcoded timeouts and dimensions
-
-These must be fixed BEFORE any quality measurement is meaningful. A **Phase 0** is missing.
-
-**5. Misstates evaluation maturity**
-
-Blueprint says evaluation is 0%. Reality:
-- ADR-014 defines 8 criteria with thresholds ✅
-- 3 hard requirements tested in automated suite ✅
-- 7 evaluation artifacts created ✅
-- 22 evaluation contract tests passing ✅
-- Manual evaluation pending (live pilot #307) ⏳
-- Automated quality regression pipeline ❌
-
-Evaluation is **~60% complete**, not 0%.
+**6. Contextual Retrieval was over-promoted**: Promoted to default Phase 3 based on Anthropic benchmarks alone, without Agentopia-specific validation. Demoted to conditional candidate in this revision.
 
 ---
 
@@ -114,99 +71,67 @@ Evaluation is **~60% complete**, not 0%.
 ### C1. Retrieval Strategy
 
 #### Option A: Vector-only baseline (current)
-- **Pros**: Already working. Zero additional latency. Zero cost. Proven for English technical docs with good embeddings.
-- **Cons**: Fails on exact keyword matches (e.g., error codes, API names). No way to improve without changing embedding model.
-- **Evidence**: `qwen/qwen3-embedding-8b` scores #1 on MTEB for multilingual — but English-only production doesn't need multilingual SOTA. `text-embedding-3-large` or `voyage-3-large` may actually score better on English technical retrieval.
+- **Repo evidence**: Works today. `knowledge.py` uses `QdrantBackend.search_scope()` with cosine similarity, topK=5.
+- **Gap**: Fails on exact keyword matches (error codes, API names). No empirical quality data.
 - **Verdict**: Sufficient for MVP. Not optimal.
 
 #### Option B: Vector + keyword hybrid (Qdrant native)
-- **Pros**: Catches exact matches that embeddings miss. Qdrant v1.16.1 supports [native BM25 with server-side IDF since v1.15](https://qdrant.tech/articles/sparse-vectors/) — **zero new infrastructure**. [Hybrid search executes in one request via prefetch + RRF fusion](https://qdrant.tech/articles/hybrid-search/). Hybrid search alone [improves recall by 1-9%](https://superlinked.com/vectorhub/articles/optimizing-rag-with-hybrid-search-reranking) depending on implementation.
-- **Cons**: Requires code changes (~500 lines) to enable text indexing + fusion logic. Requires re-creating collections (migration).
-- **Cost**: $0 — Qdrant already deployed and running. Rust + SIMD-optimized inverted index [keeps latency low even at scale](https://qdrant.tech/articles/sparse-embeddings-ecommerce-part-1/).
-- **Verdict**: Best ROI. Uses capabilities we're already paying for.
+- **Repo evidence**: Qdrant v1.16.1 deployed. Current code uses only `client.search(query_vector)` — does not use Qdrant's native text indexing or sparse vectors.
+- **External evidence**: Qdrant v1.15+ supports [native BM25 with server-side IDF](https://qdrant.tech/articles/sparse-vectors/). [Hybrid search in one request via prefetch + RRF](https://qdrant.tech/articles/hybrid-search/). [Hybrid improves recall 1-9%](https://superlinked.com/vectorhub/articles/optimizing-rag-with-hybrid-search-reranking) over vector-only.
+- **Cost**: $0 — uses existing Qdrant instance.
+- **Verdict**: Best ROI. Uses deployed capability we're not using.
 
 #### Option C: Vector + keyword + reranker
-- **Pros**: Reranking adds [+28% nDCG@10 improvement](https://www.zeroentropy.dev/articles/ultimate-guide-to-choosing-the-best-reranking-model-in-2025) (ZeroEntropy zerank-1 benchmark). [Pinecone reports 48% quality improvement](https://superlinked.com/vectorhub/articles/optimizing-rag-with-hybrid-search-reranking) using full hybrid+reranker vs single-method.
-- **Cons**: Adds 100-300ms latency. Requires either new service (ONNX reranker) or API cost (Cohere Rerank ~[$1/1K queries](https://docs.bswen.com/blog/2026-02-25-best-reranker-models/)). Added operational complexity.
-- **Evidence**: Current 5s timeout budget has room for +300ms. But adding a service increases failure surface. Industry consensus: ["A reranker can only reorder what your retrieval system already found"](https://docs.bswen.com/blog/2026-02-25-hybrid-search-vs-reranker/) — recall (hybrid) before precision (reranker).
-- **Verdict**: High value but adds complexity. Should come AFTER hybrid proves insufficient.
+- **External evidence**: [+28% nDCG@10](https://www.zeroentropy.dev/articles/ultimate-guide-to-choosing-the-best-reranking-model-in-2025) (ZeroEntropy). [48% quality improvement](https://superlinked.com/vectorhub/articles/optimizing-rag-with-hybrid-search-reranking) (Pinecone, hybrid+reranker vs single-method). But: ["A reranker can only reorder what retrieval already found"](https://docs.bswen.com/blog/2026-02-25-hybrid-search-vs-reranker/).
+- **Verdict**: High value, but recall (hybrid) must come before precision (reranker).
 
-**Recommendation: Option B first. Option C only if eval shows hybrid is insufficient.**
+**Recommendation: Option B first. Option C only if labeled eval data from Phase 1 shows hybrid is insufficient.**
 
-### C2. Reranker Choice (if needed)
+### C2. Reranker Choice (if needed — conditional)
 
-#### Option A: Local ONNX (BAAI/bge-reranker-v2-m3)
-- **Pros**: Zero API cost. [278M params, scores 51.8 nDCG@10 on BEIR, Apache 2.0 license](https://docs.bswen.com/blog/2026-02-25-best-reranker-models/). Predictable latency (~100ms on GPU). [Runs on CPU for batches under 100 pairs](https://www.analyticsvidhya.com/blog/2025/06/top-rerankers-for-rag/).
-- **Cons**: Requires GPU or beefy CPU for production load. New container deployment. Model updates require image rebuild.
-- **Resource**: Needs ~2GB RAM, 0.5 CPU minimum. k3s on server36 has limited resources.
+- **Local ONNX**: [BAAI/bge-reranker-v2-m3 — 278M params, 51.8 nDCG@10 on BEIR, Apache 2.0](https://docs.bswen.com/blog/2026-02-25-best-reranker-models/). Runs on CPU for <100 pairs.
+- **API**: [Cohere Rerank ~$1/1K queries, ~8-11% improvement](https://lancedb.com/blog/benchmarking-cohere-reranker-with-lancedb/). Lower ops burden.
+- **Alternative**: [Jina Reranker v3 — 81.3% Hit@1, 188ms, Apache 2.0](https://docs.bswen.com/blog/2026-02-25-best-reranker-models/).
 
-#### Option B: API-based (Cohere Rerank)
-- **Pros**: No infrastructure. Pay per query (~$1/1K queries). Always latest model. [Cohere reranking gets ~8-11% performance increase over base retrieval](https://lancedb.com/blog/benchmarking-cohere-reranker-with-lancedb/).
-- **Cons**: Network dependency. Another API key to manage. Latency variability (~200ms).
-- **Alternative**: [Jina Reranker v3 — 81.3% Hit@1, 188ms latency, Apache 2.0](https://docs.bswen.com/blog/2026-02-25-best-reranker-models/) — fast self-hosted option if Cohere cost becomes an issue.
+**Decision deferred until Phase 2 eval data exists.**
 
-**Recommendation: Defer reranker decision until hybrid search eval data proves it's needed. If needed, start with Cohere API (lower operational burden) and migrate to ONNX if cost becomes an issue.**
+### C3. Search Backend
 
-### C3. Search Backend Strategy
+- **Qdrant native** (recommended): Already deployed. [Native BM25 since v1.15](https://qdrant.tech/articles/sparse-vectors/). Zero new services.
+- **Elasticsearch**: Overkill for <10K documents. [80.5% of enterprise RAG uses FAISS/ES](https://www.mdpi.com/2076-3417/16/1/368), but Qdrant native hybrid is adequate.
 
-#### Option A: Qdrant native capabilities first
-- **Pros**: Already deployed (v1.16.1). [Native BM25 since v1.15 with server-side IDF](https://qdrant.tech/articles/sparse-vectors/). [Sparse vectors since v1.7](https://qdrant.tech/articles/sparse-vectors/). Zero new services. Zero additional cost. [Qdrant Cloud Inference supports hybrid search natively](https://qdrant.tech/documentation/tutorials-and-examples/cloud-inference-hybrid-search/).
-- **Cons**: Full-text search less mature than Elasticsearch. No advanced NLP features (stemming, synonyms).
-- **Evidence**: For English technical docs with < 10K documents in year 1, Qdrant native is adequate. [80.5% of enterprise RAG uses FAISS or Elasticsearch](https://www.mdpi.com/2076-3417/16/1/368) — but Qdrant's native hybrid is a modern alternative without the operational burden.
-
-#### Option B: External search engine (Elasticsearch/Meilisearch)
-- **Pros**: Battle-tested full-text search. Advanced NLP (stemming, fuzzy matching, synonyms).
-- **Cons**: New service to deploy, configure, monitor. Memory-hungry (Elasticsearch: 2-4GB min). Operational overhead. Data sync complexity. [Gap between RAG prototype and production spans months of engineering effort](https://introl.com/blog/rag-infrastructure-production-retrieval-augmented-generation-guide) — adding more services widens this gap.
-
-**Recommendation: Option A — Qdrant native. We have the capability deployed and unused. Adding Elasticsearch for a knowledge base that will have < 10K documents in year 1 is overengineering.**
+**Recommendation: Qdrant native. External search engine REJECTED for current scale.**
 
 ### C4. Ingestion Evolution
 
-#### Option A: Keep current chunking
-- **Pros**: Working. Tested. Three strategies cover most document types.
-- **Cons**: Fixed-size (default) breaks semantic boundaries. No empirical data on which strategy works best.
+**Repo evidence**: Current 3 strategies (fixed-size, paragraph, code-aware) are working and tested. Semantic chunking defined in enum but intentionally deferred.
 
-#### Option B: Add semantic chunking
-- **Pros**: Preserves meaning units. Better retrieval precision in theory.
-- **Cons**: Requires additional embedding calls per chunk boundary decision. More complex. Already defined in enum but not implemented — suggests it was deferred intentionally.
+**All ingestion improvements are conditional on Phase 1 eval data showing chunk quality is a bottleneck.**
 
-#### Option C: Add structured ingestion (JSON/YAML schemas)
-- **Pros**: API docs, config files get proper typed chunks. Higher-quality metadata.
-- **Cons**: Niche use case. Limited to specific document types.
+### C5. Graph RAG — DEFERRED
 
-#### Option D: Add incremental re-indexing
-- **Pros**: Faster updates for large documents. Only re-embed changed chunks.
-- **Cons**: Complexity in diffing chunks. Current hash-based dedup already skips identical re-uploads.
+**Repo evidence**: Neo4j exists for mem0 graph memory. Knowledge system is separate.
+**External evidence**: [Neo4j advocates Graph RAG](https://neo4j.com/blog/genai/advanced-rag-techniques/) but industry consensus: ["RAG remains the grounding mechanism"](https://datanucleus.dev/rag-and-agentic-ai/what-is-rag-enterprise-guide-2025) — ground basics first.
 
-**Recommendation: Keep current chunking for Phase 0-2. Add semantic chunking in Phase 3 ONLY IF eval data shows chunking quality is a bottleneck. Structured ingestion and incremental re-indexing are future enhancements.**
-
-### C5. Graph RAG
-
-#### Include now
-- **Pros**: Enables multi-hop reasoning. Richer context. [Neo4j advocates Graph RAG for complex entity relationships](https://neo4j.com/blog/genai/advanced-rag-techniques/).
-- **Cons**: Highest complexity. Requires entity extraction pipeline (new LLM calls per ingest = cost + latency). Neo4j schema for knowledge entities is separate from mem0 graph. Graph traversal at query time adds 200-500ms. No proven demand from current clients.
-
-#### Defer
-- **Pros**: Focus on core retrieval quality first. Graph RAG value depends on having good base retrieval to build on. Current system doesn't even have quality metrics to measure Graph RAG impact. Industry consensus: ["agents orchestrate when and how to retrieve; RAG remains the grounding mechanism"](https://datanucleus.dev/rag-and-agentic-ai/what-is-rag-enterprise-guide-2025) — ground the basics before adding graph layers.
-- **Cons**: Delays a differentiation feature.
-
-**Recommendation: Explicitly defer. Graph RAG requires a proven retrieval foundation + quality metrics to measure its impact. Building it now would be research, not production hardening.**
+**Explicitly deferred. No client demand. High complexity. Needs retrieval foundation first.**
 
 ### C6. Evaluation Strategy
 
-#### Option A: Manual-only (current path via #307)
-- **Pros**: Already designed. Artifacts exist. #307 is the gate.
-- **Cons**: Not repeatable. Cannot detect regressions. One-time.
+#### Two distinct evaluation layers (CRITICAL DISTINCTION)
 
-#### Option B: Artifact + automated regression pipeline
-- **Pros**: Repeatable. Detects regressions on code changes. CI-integrated. Industry standard: ["test sets combine golden data, synthetic queries, and human review"](https://www.evidentlyai.com/llm-guide/rag-evaluation).
-- **Cons**: Requires golden dataset (client collaboration needed). Significant upfront effort.
+**Layer 1 — Reference-free quality signals (RAGAS)**:
+- [Faithfulness, Context Precision, Answer Relevancy](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/) via LLM-as-judge
+- No golden dataset needed. Can start immediately after Phase 0.
+- Useful as **early signal** and **directional regression check**
+- Limitation: LLM-as-judge has biases. NOT a substitute for labeled metrics.
 
-#### Option C: RAGAS-based minimal viable eval gate
-- **Pros**: Pragmatic. [RAGAS provides reference-free evaluation using LLM-as-judge](https://docs.ragas.io/en/stable/concepts/metrics/) — no golden dataset needed to start. Key metrics: [Faithfulness, Context Precision, Context Recall, Answer Relevancy](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/). Python-native, CI-runnable. [nDCG correlates most strongly with end-to-end RAG quality](https://labelyourdata.com/articles/llm-fine-tuning/rag-evaluation).
-- **Cons**: LLM-as-judge has its own biases. Limited coverage. Needs refinement with golden data later.
+**Layer 2 — Labeled retrieval ranking metrics**:
+- nDCG@5, MRR, Precision@5 — require **human-labeled relevance judgments**
+- Need golden dataset: query + expected relevant chunks with graded relevance
+- This is the **authoritative quality gate** for Phase 2 improvement claims
+- Cannot be shortcut. RAGAS does NOT produce these.
 
-**Recommendation: Option C first (RAGAS eval gate), evolve to Option B after first client deployment provides real data for golden dataset. #307 manual pilot runs in parallel.**
+**Recommendation**: Start with RAGAS (Layer 1) as early signal in Phase 1a. Build labeled dataset from #307 pilot + client collaboration for Layer 2 in Phase 1b. Phase 2 eval gate MUST use labeled nDCG@5, not RAGAS alone.
 
 ---
 
@@ -219,55 +144,55 @@ Query
   ↓
 Qdrant vector search (cosine, top-20)     ← existing, increase limit
   +
-Qdrant full-text search (BM25, top-20)    ← NEW: enable native text index
+Qdrant BM25 search (sparse, top-20)       ← NEW: enable native BM25
   ↓
 Reciprocal Rank Fusion (RRF)              ← NEW: merge + deduplicate
   ↓
 Top-5 by fused score
   ↓
-Confidence threshold (configurable)        ← existing, make configurable via Helm
+Confidence threshold (configurable)        ← existing, expose via Helm
   ↓
 Token budget enforcement                   ← existing
   ↓
 XML injection into LLM context             ← existing
 ```
 
-**No reranker in V1.** Added only if eval data proves hybrid is insufficient.
+**No reranker in V1.** Added only if labeled eval data proves hybrid is insufficient.
 
 ### Target Ingestion Stack
 
-**No changes to ingestion pipeline in V1.** Current pipeline is production-grade.
-
-Future enhancement (post-production): semantic chunking if eval shows chunk quality is a bottleneck.
+**No changes in production V1.** Current pipeline is production-grade (repo-proven).
 
 ### Target Evaluation Approach
 
-1. **Minimal eval gate** (automated): 5 core queries per scope, check that retrieval returns relevant chunks (score > threshold) and citations map to real sources. Run on every deploy.
-2. **Live pilot** (manual): Complete #307 with first client. 20+ queries, 6 scenario types.
-3. **Regression pipeline** (future): Golden dataset from #307 results → automated nDCG/MRR tracking in CI.
+| Layer | What | When | Gate Type |
+|---|---|---|---|
+| **1a. RAGAS** | Faithfulness + Context Precision (reference-free) | Phase 1 immediate — no golden dataset needed | Early signal, directional regression |
+| **1b. Labeled baseline** | nDCG@5, MRR, Precision@5 against golden queries | Phase 1 after #307 pilot produces labeled data | **Authoritative quality gate** |
+| **2. Eval gate** | nDCG@5 improvement ≥ 10% over labeled baseline | Phase 2 hybrid search | Hard gate — must use labeled metrics, not RAGAS |
 
-### Target Observability Approach
+### Target Observability
 
 | Metric | Type | Purpose |
 |---|---|---|
-| `knowledge_search_latency_seconds` | Histogram | Track p50/p95/p99 retrieval latency |
-| `knowledge_search_results_count` | Histogram | Distribution of result counts per query |
-| `knowledge_search_top_score` | Histogram | Track confidence of best result |
-| `knowledge_ingest_chunks_total` | Counter | Volume of indexed data |
-| `knowledge_embedding_latency_seconds` | Histogram | OpenRouter API latency tracking |
-| `knowledge_search_errors_total` | Counter (by type) | Qdrant failures, timeout, embedding errors |
+| `knowledge_search_latency_seconds` | Histogram | p50/p95/p99 retrieval latency |
+| `knowledge_search_results_count` | Histogram | Result count distribution per query |
+| `knowledge_search_top_score` | Histogram | Best result confidence |
+| `knowledge_ingest_chunks_total` | Counter | Indexed data volume |
+| `knowledge_embedding_latency_seconds` | Histogram | OpenRouter API latency |
+| `knowledge_search_errors_total` | Counter (by type) | Qdrant/embedding/timeout failures |
 
 ### Explicit Deferrals
 
 | Item | Reason | Revisit When |
 |---|---|---|
-| **Graph RAG** | No proven demand. Requires retrieval foundation first. High complexity. | After Phase 2 eval shows multi-hop queries fail |
-| **Reranker** | Adds latency + operational complexity. Hybrid search may be sufficient. | After Phase 2 eval shows hybrid insufficient |
-| **Semantic chunking** | Current chunking untested against quality metrics. May be fine. | After Phase 1 eval shows chunk quality is bottleneck |
-| **Structured ingestion** | Niche use case. No current demand. | Client request |
-| **Auto-ingestion hooks** | Premature automation. Manual upload sufficient for first clients. | Scale demand |
-| **Feedback loop / RLHF** | Research feature. No foundation to build on yet. | Post-production |
-| **Multilingual optimization** | English-first production. qwen/qwen3-embedding-8b already handles English well. | Non-English client demand |
+| **Graph RAG** | No demand. High complexity. Needs retrieval foundation. | Multi-hop query failures in production |
+| **Reranker** | Adds latency + complexity. Hybrid may suffice. | Phase 2 labeled eval shows hybrid insufficient |
+| **Contextual Retrieval** | Promising ([Anthropic: -49% failure rate](https://www.anthropic.com/news/contextual-retrieval)) but unvalidated on Agentopia data. | Phase 2 eval data + cost-benefit analysis |
+| **Semantic chunking** | Current chunking untested against quality metrics. | Phase 1 eval shows chunk quality is bottleneck |
+| **Agentic RAG** | [Adds unpredictability](https://towardsdatascience.com/agentic-rag-vs-classic-rag-from-a-pipeline-to-a-control-loop/). Injection-based is correct for our use case. | Multi-hop demand proven |
+| **Auto-ingestion** | Manual upload sufficient for first clients. | Scale demand |
+| **Multilingual optimization** | English-first assumption. | Non-English client demand |
 
 ---
 
@@ -275,67 +200,76 @@ Future enhancement (post-production): semantic chunking if eval shows chunk qual
 
 ### Phase 0: Foundation Hardening (prerequisite)
 
-**Why**: Known fragility that will cause production incidents if not fixed. Must be done before any quality measurement is meaningful.
+**Why**: Known fragility that will cause production incidents. Must fix before quality measurement is meaningful.
 
 | Task | Description | Risk if Skipped |
 |---|---|---|
-| **F0.1** Fix knowledge plugin Helm config | Add `knowledgeRetrieval` section to `configmap-config.yaml` — currently silently disabled | Knowledge injection doesn't work for new bots |
-| **F0.2** Add retry + exponential backoff on embedding API | `tenacity.retry` with 3 attempts, backoff 1s→2s→4s | Transient OpenRouter failures cause ingest failures |
-| **F0.3** Add circuit breaker on OpenRouter | After 5 failures, fast-fail for 5 minutes | Cascading failures during API outage |
-| **F0.4** Expose embedding timeout as env var | Replace hardcoded 30s with `EMBEDDING_TIMEOUT_SECS` | Cannot tune without code redeploy |
-| **F0.5** Expose vector dimension as env var | Replace hardcoded 1024 with `EMBEDDING_VECTOR_SIZE` | Model change requires code change |
-| **F0.6** Add Qdrant health check endpoint | `/health` returns Qdrant reachability | Silent search failures undetectable |
-| **F0.7** Add `score_threshold` to Qdrant search | Use Qdrant native param instead of post-filtering | Slightly more efficient, correct behavior |
+| **F0.1** Fix knowledge plugin Helm config | Add `knowledgeRetrieval` section to `configmap-config.yaml` | Knowledge injection silently disabled for new bots |
+| **F0.2** Retry + exponential backoff on embedding API | `tenacity.retry`, 3 attempts, 1s→2s→4s | Transient OpenRouter failures crash ingest |
+| **F0.3** Circuit breaker on OpenRouter | 5 failures → fast-fail 5 minutes | Cascading failures during API outage |
+| **F0.4** Expose embedding timeout as env var | Replace hardcoded 30s | Cannot tune without redeploy |
+| **F0.5** Expose vector dimension as env var | Replace hardcoded 1024 | Model change requires code change |
+| **F0.6** Qdrant health check endpoint | `/health` returns reachability | Silent search failures |
+| **F0.7** `score_threshold` in Qdrant search | Native param vs post-filter | Slightly more efficient |
 
-**Scope**: Code changes only. No infrastructure changes. No new services. Estimated: 1-2 PRs.
+**Scope**: Code changes only. 1-2 PRs.
 
 ### Phase 1: Evaluation Baseline
 
-**Why**: Cannot improve what we cannot measure. Must run BEFORE hybrid search so we have a baseline to compare against.
+**Two sub-phases reflecting the two evaluation layers:**
+
+#### Phase 1a: RAGAS early signal (no golden dataset needed)
 
 | Task | Description |
 |---|---|
-| **E1.1** Define 5 core eval queries per scope | Work with first client to create representative queries with expected results |
-| **E1.2** Implement retrieval metrics | nDCG@5, MRR, Precision@5 — computed against eval queries |
-| **E1.3** Implement citation accuracy check | Verify every [N] maps to a real retrieved chunk |
-| **E1.4** Minimal eval gate in CI | On PR to knowledge code: run eval queries, fail if nDCG@5 drops > 10% |
-| **E1.5** Complete #307 live pilot | First client, 20+ queries, 6 scenarios, CTO sign-off |
-| **E1.6** Baseline metrics report | Document: current nDCG@5, MRR, citation accuracy, latency p95 |
+| **E1a.1** Integrate RAGAS Python library | Add to bot-config-api test dependencies |
+| **E1a.2** Implement reference-free checks | Faithfulness + Context Precision on sample queries |
+| **E1a.3** CI regression gate (RAGAS) | Flag if faithfulness drops >15% between PRs — **directional signal only** |
 
-**Dependency**: E1.1 requires first client documents. E1.5 = #307 closure.
+#### Phase 1b: Labeled retrieval baseline (requires client data)
+
+| Task | Description |
+|---|---|
+| **E1b.1** Complete #307 live pilot | First client, 20+ queries, 6 scenarios |
+| **E1b.2** Build golden dataset from pilot | Query + expected relevant chunks + graded relevance (0/1/2) |
+| **E1b.3** Implement labeled metrics | nDCG@5, MRR, Precision@5 computed against golden data |
+| **E1b.4** Baseline metrics report | Document: current nDCG@5, MRR, citation accuracy, latency p95 |
+| **E1b.5** CI eval gate (labeled) | Fail if nDCG@5 drops >10% — **authoritative gate** |
+
+**Dependency**: Phase 1b requires first client documents (#307). Phase 1a can start immediately after Phase 0.
 
 ### Phase 2: Retrieval Quality (Hybrid Search)
 
-**Why**: Highest ROI improvement that uses infrastructure we already have.
-
 | Task | Description |
 |---|---|
-| **R2.1** Enable Qdrant payload text indexing | Create text index on `payload.text` field in each collection |
-| **R2.2** Implement Qdrant native full-text search | Add text search query alongside vector search |
-| **R2.3** Implement Reciprocal Rank Fusion (RRF) | Fuse vector + text results: `score = 1/(k + rank_vector) + 1/(k + rank_text)` |
-| **R2.4** Collection migration | Re-create collections with text index (data migration script) |
-| **R2.5** Add observability metrics | `knowledge_search_latency_seconds`, `knowledge_search_top_score`, etc. |
-| **R2.6** Eval gate | Require nDCG@5 improvement ≥ 10% over Phase 1 baseline |
+| **R2.1** Enable Qdrant native BM25 | Sparse vector config + text tokenization per collection |
+| **R2.2** Implement hybrid search | Vector + BM25 parallel query via Qdrant prefetch API |
+| **R2.3** Implement RRF fusion | `score = 1/(k + rank_vector) + 1/(k + rank_text)` |
+| **R2.4** Collection migration | Re-create collections with BM25 support (migration script) |
+| **R2.5** Observability metrics | Prometheus counters/histograms for retrieval stack |
+| **R2.6** **Labeled eval gate** | Require nDCG@5 ≥ 10% improvement over Phase 1b baseline. **Must use labeled metrics, not RAGAS.** |
 
-**Cost**: $0 — Qdrant native features. Code changes + collection migration only.
+**Cost**: $0 — Qdrant native features.
 
-### Phase 3: Ingestion Improvements (if data supports)
+### Phase 3+: Conditional Experiments (only if Phase 1/2 data justifies)
 
-**Gate**: Only proceed if Phase 1 eval shows chunk quality is a retrieval bottleneck.
+**No default recommendation for Phase 3.** All options are candidates, not commitments:
 
-| Task | Description |
-|---|---|
-| **I3.1** Implement semantic chunking | Embed sliding windows, split where cosine drops below threshold |
-| **I3.2** Eval comparison | Compare nDCG@5: fixed-size vs paragraph vs semantic chunking on same golden dataset |
-| **I3.3** Per-scope strategy config | Allow operators to choose chunking strategy per scope via UI |
+| Candidate | Trigger Condition | External Evidence |
+|---|---|---|
+| **Contextual Retrieval** | Phase 2 eval shows ingestion-side chunk quality limits recall | [Anthropic: -49% failure rate](https://www.anthropic.com/news/contextual-retrieval), [$1.02/1M tokens one-time](https://www.anthropic.com/news/contextual-retrieval) |
+| **Semantic chunking** | Phase 1 eval shows fixed-size chunking breaks semantic boundaries | Defined in code enum, not yet implemented |
+| **Reranker** | Phase 2 labeled nDCG@5 plateaus below target | [+28% nDCG@10 possible](https://www.zeroentropy.dev/articles/ultimate-guide-to-choosing-the-best-reranking-model-in-2025) |
+| **Query expansion** | Phase 1 eval shows short/ambiguous queries have low recall | External directional evidence only |
 
-### Phase 4+: Optional Advanced Tracks (post-production)
+**Each candidate requires Agentopia-specific eval data before promotion to committed path.**
+
+### Phase 4+: Post-Production
 
 | Track | Trigger |
 |---|---|
-| **Reranker** | Phase 2 eval shows hybrid is insufficient (nDCG@5 < target) |
 | **Graph RAG** | Multi-hop query failures identified in production |
-| **Query expansion** | Eval shows short/ambiguous queries have low recall |
+| **Agentic RAG** | Injection-based consistently misses relevant context |
 | **Caching** | Observability shows >30% duplicate queries within 5min |
 | **Auto-ingestion** | Client requests automated document sync |
 
@@ -343,244 +277,225 @@ Future enhancement (post-production): semantic chunking if eval shows chunk qual
 
 ## F. Decision Points — Recommendations
 
-### 1. Should we add Phase 0 foundation hardening before evaluation work?
+### 1. Approve Phase 0 foundation hardening before evaluation?
 
-**YES.** Phase 0 is mandatory. Known issues (Helm config gap, no retry, hardcoded values) will cause production incidents. Evaluation on a fragile foundation produces unreliable metrics. Phase 0 scope is small (1-2 PRs) and should take < 1 week.
+**YES.** Mandatory. Known fragility (Helm config gap, no retry, hardcoded values) causes production incidents and unreliable eval metrics. Small scope (1-2 PRs).
 
-### 2. Is evaluation truly Phase 1, or does anything have to happen before it?
+### 2. Approve RAGAS as Phase 1 evaluation framework?
 
-**Phase 0 → Phase 1.** Evaluation is correctly Phase 1, but Phase 0 must come first. Additionally, Phase 1 depends on first client documents (for eval queries) — this is a business dependency, not a technical one.
+**YES, as Layer 1 early signal only.** RAGAS provides reference-free faithfulness/context precision checks without golden data. But it does NOT replace labeled retrieval metrics (nDCG/MRR). Phase 1 has two sub-phases: 1a (RAGAS, immediate) and 1b (labeled baseline, after #307 client data).
 
-### 3. Is hybrid + reranker the highest-ROI retrieval path?
+### 3. Approve Qdrant native hybrid as Phase 2?
 
-**Hybrid YES, reranker DEFER.** Hybrid search using Qdrant native full-text indexing is zero-cost infrastructure and catches exact keyword matches that embeddings miss. Reranker adds latency and operational complexity — defer until eval data proves it's needed.
+**YES.** Zero infrastructure cost. Uses Qdrant features already deployed but unused. Eval gate uses **labeled nDCG@5**, not RAGAS.
 
-### 4. Should Graph RAG be deferred?
+### 4. Approve Graph RAG deferral?
 
-**YES — explicitly deferred.** Reasons:
-- No proven client demand for multi-hop queries
-- Requires entity extraction pipeline (new LLM calls per ingest = cost)
-- Requires quality metrics to measure impact (not available until Phase 1)
-- High implementation complexity for uncertain value
-- Focus should be on core retrieval quality first
+**YES.** No client demand. High complexity. No quality metrics to measure impact yet.
 
-### 5. What is the minimum production-ready eval gate?
+### 5. Minimum production-ready eval gate?
 
-**Minimal viable**: 5 core queries per scope + automated nDCG@5 check in CI + #307 manual pilot completion with CTO sign-off. Full regression pipeline is Phase 1+ enhancement.
+**Phase 1a** (RAGAS directional signal) + **#307 manual pilot** (CTO sign-off) for initial production.
+**Phase 1b** (labeled nDCG@5 baseline) required before Phase 2 claims can be validated.
 
-### 6. Which parts are required for production, which are optional?
+### 6. Required vs optional scope?
 
-| Requirement Level | Items |
+| Level | Items |
 |---|---|
-| **REQUIRED for production** | Phase 0 (foundation hardening), #307 completion (live pilot), basic observability metrics |
-| **REQUIRED for production quality** | Phase 1 (evaluation baseline), Phase 2 (hybrid search) |
-| **OPTIONAL future work** | Reranker, Graph RAG, semantic chunking, auto-ingestion, feedback loop, query expansion |
+| **REQUIRED for production** | Phase 0, #307 completion, RAGAS early signal, basic observability |
+| **REQUIRED for quality claims** | Phase 1b labeled baseline, Phase 2 with labeled eval gate |
+| **CONDITIONAL** | All Phase 3+ candidates — evidence-driven only |
+| **DEFERRED** | Graph RAG, Agentic RAG, auto-ingestion, multilingual |
 
 ---
 
 ## G. Decision Summary
 
-| Decision | Verdict | Rationale |
+| Decision | Verdict | Evidence Type |
 |---|---|---|
-| Add Phase 0 before evaluation | **RECOMMENDED** | Known fragility must be fixed first |
-| Hybrid search via Qdrant native | **RECOMMENDED** | Zero cost, uses deployed capability, highest ROI |
-| Reranker (any type) | **DEFERRED** | Wait for hybrid eval data |
-| Graph RAG | **DEFERRED** | No demand, high complexity, needs retrieval foundation |
-| Semantic chunking | **DEFERRED** | Current chunking untested; may be sufficient |
-| External search engine (ES/Meilisearch) | **REJECTED** | Qdrant native is sufficient for current scale |
-| Multilingual optimization | **DEFERRED** | English-first production assumption |
-| Auto-ingestion hooks | **DEFERRED** | Manual upload sufficient for first clients |
-| Feedback loop / RLHF | **REJECTED for now** | Research feature, no foundation to build on |
-| Minimal eval gate for CI | **RECOMMENDED** | Pragmatic, catches regressions, evolves to full pipeline |
-| Full golden dataset pipeline | **DEFERRED** | Requires real client data from #307 |
-
-### Blueprint Revision Required
-
-The existing `super-rag-blueprint.md` should be updated to:
-1. ~~37% coverage score~~ → Reframe as ~55-60% with production-relevant scope
-2. Add Phase 0 (foundation hardening)
-3. Move Graph RAG from Phase 4 to "Deferred — post-production"
-4. Remove non-RAG items from gap scoring (Reasoning Engine, Tooling Layer)
-5. Correct evaluation maturity from 0% to ~60%
-6. Specify Qdrant native for hybrid search (not generic "BM25")
-7. Remove reranker from core production path (move to conditional Phase 4)
+| Phase 0 before evaluation | **RECOMMENDED** | Repo: known fragility in code |
+| RAGAS as early signal | **RECOMMENDED** | External: [RAGAS framework](https://docs.ragas.io/en/stable/concepts/metrics/). Limitation: not a substitute for labeled metrics |
+| Labeled nDCG/MRR as authoritative gate | **RECOMMENDED** | Industry standard: [nDCG correlates with RAG quality](https://labelyourdata.com/articles/llm-fine-tuning/rag-evaluation) |
+| Hybrid search via Qdrant native | **RECOMMENDED** | Repo: Qdrant v1.16.1 deployed. External: [native BM25 since v1.15](https://qdrant.tech/articles/sparse-vectors/) |
+| Reranker | **DEFERRED** | Conditional on Phase 2 labeled eval |
+| Graph RAG | **DEFERRED** | No demand, high complexity |
+| Contextual Retrieval | **CONDITIONAL candidate** | External: [Anthropic benchmarks](https://www.anthropic.com/news/contextual-retrieval). Needs Agentopia-specific validation |
+| Semantic chunking | **CONDITIONAL candidate** | Repo: enum defined, not implemented. Needs eval data |
+| External search engine | **REJECTED** | Qdrant native sufficient. <10K docs year 1 |
+| Knowledge service extraction | **RECOMMENDED for Phase 2** | Repo: monolithic bot-config-api. See Section J |
 
 ---
 
+## H. Market Research — Industry Context
+
+> **Evidence separation**: This section provides **external directional evidence**. It informs but does not settle architecture decisions. Repo-specific evidence is in Sections A-E.
+
+### H1. Industry Standard Pipeline
+
+Production RAG has converged on three stages: recall → fusion → precision.
+- [Hybrid improves recall 1-9%](https://superlinked.com/vectorhub/articles/optimizing-rag-with-hybrid-search-reranking) over vector-only
+- [Reranker adds +28% nDCG@10](https://www.zeroentropy.dev/articles/ultimate-guide-to-choosing-the-best-reranking-model-in-2025) on top of hybrid
+- [Full pipeline: 48% quality improvement](https://superlinked.com/vectorhub/articles/optimizing-rag-with-hybrid-search-reranking) vs single-method (Pinecone)
+- Critical: ["Reranker can only reorder what retrieval already found"](https://docs.bswen.com/blog/2026-02-25-hybrid-search-vs-reranker/) — recall first, precision second
+
+### H2. Qdrant Native Hybrid
+
+- [Native BM25 with server-side IDF since v1.15](https://qdrant.tech/articles/sparse-vectors/)
+- [Hybrid in one request via prefetch + RRF](https://qdrant.tech/articles/hybrid-search/)
+- [Rust + SIMD inverted index](https://qdrant.tech/articles/sparse-embeddings-ecommerce-part-1/) — production-grade performance
+
+### H3. Contextual Retrieval (Anthropic)
+
+- [Contextual Embeddings + BM25: -49% retrieval failure rate](https://www.anthropic.com/news/contextual-retrieval)
+- [With reranking: -67%](https://www.anthropic.com/news/contextual-retrieval)
+- [Cost: $1.02/1M doc tokens one-time](https://www.anthropic.com/news/contextual-retrieval)
+- [AWS Bedrock has native support](https://aws.amazon.com/blogs/machine-learning/contextual-retrieval-in-anthropic-using-amazon-bedrock-knowledge-bases/)
+- **Note**: These are Anthropic's benchmarks, not Agentopia-validated. Remains conditional candidate.
+
+### H4. Evaluation Frameworks
+
+- [RAGAS: reference-free, LLM-as-judge, Python-native](https://docs.ragas.io/en/stable/concepts/metrics/)
+- [nDCG correlates most strongly with end-to-end RAG quality](https://labelyourdata.com/articles/llm-fine-tuning/rag-evaluation) — requires labeled data
+- Industry: ["test sets combine golden data, synthetic queries, and human review"](https://www.evidentlyai.com/llm-guide/rag-evaluation)
+
+### H5. Enterprise Stats
+
+- [63.6% use GPT-based models; 80.5% use FAISS/ES](https://www.mdpi.com/2076-3417/16/1/368)
+- [Retrieval reduces hallucinations by 47%](https://www.aplyca.com/en/blog/ultimate-guide-to-rag-for-enterprise-use-cases-platforms-and-production-best)
+- [Prototype-to-production gap spans months](https://introl.com/blog/rag-infrastructure-production-retrieval-augmented-generation-guide)
+
+### H6. Agentic vs Injection-Based RAG
+
+- [Agentic: control loop, multi-hop, tool-based](https://arxiv.org/abs/2501.09136)
+- [Classic RAG better when "predictable cost and latency are priorities"](https://towardsdatascience.com/agentic-rag-vs-classic-rag-from-a-pipeline-to-a-control-loop/)
+- [Enterprises blend both — "agents orchestrate, RAG grounds"](https://datanucleus.dev/rag-and-agentic-ai/what-is-rag-enterprise-guide-2025)
+- **Agentopia alignment**: Injection-based is correct for current use case. Agentic is Phase 4+.
+
 ---
 
-## H. Market Research — Industry Best Practices & Trending Tech
+## J. Service Architecture Assessment — Microservice Readiness
 
-### H1. Industry Standard: Three-Stage Retrieval Pipeline
+> **Client requirement**: RAG components should be extractable to independent services, not locked into a monolithic bot-config-api or gateway.
 
-The production RAG industry has converged on a **three-stage pipeline** as the default architecture:
+### Current State (repo-proven)
+
+All knowledge/RAG logic currently lives inside **`bot-config-api`**:
+
+| Module | Location | Responsibility | Lines |
+|---|---|---|---|
+| `knowledge.py` | `bot-config-api/src/services/` | KnowledgeService, QdrantBackend, chunking, embedding, search | ~780 |
+| `knowledge router` | `bot-config-api/src/routers/` | REST API: ingest, search, delete, lifecycle | ~350 |
+| `document_store.py` | `bot-config-api/src/services/` | PostgresDocumentStore, lifecycle management | ~270 |
+| `bot_knowledge_index.py` | `bot-config-api/src/services/` | Bot→scope binding resolution | ~135 |
+| `knowledge models` | `bot-config-api/src/models/` | Pydantic schemas | ~170 |
+| **Total** | | | **~1,700 lines** |
+
+Gateway side:
+| Module | Location | Responsibility | Lines |
+|---|---|---|---|
+| `knowledge-retrieval/index.ts` | `gateway/extensions/` | Plugin: query → API call → XML injection | ~230 |
+
+### Problem Analysis
+
+**bot-config-api has too many responsibilities**:
+1. Bot CRUD + deployment (Application CRD management)
+2. SOUL/USER prompt generation
+3. Knowledge ingestion + search + lifecycle
+4. A2A protocol server
+5. Workflow/Temporal integration
+6. Usage metrics
+
+Knowledge is **~1,700 lines** of domain-specific logic (embedding, chunking, vector search, document lifecycle) that shares nothing with bot deployment except the Qdrant connection and Postgres instance.
+
+**Risks of keeping it monolithic**:
+- Embedding API circuit breaker affects bot deployment availability
+- Knowledge ingest load (CPU-intensive chunking + API calls) competes with bot-config-api request handling
+- Cannot scale knowledge processing independently
+- Cannot deploy knowledge service updates without redeploying bot-config-api
+- Harder to test knowledge in isolation
+
+### Extraction Plan — `knowledge-api` Service
+
+**Recommended for Phase 2** (when hybrid search adds complexity):
 
 ```
-Stage 1: Recall (BM25 + Dense Vector in parallel)
-Stage 2: Fusion (Reciprocal Rank Fusion)
-Stage 3: Precision (Cross-encoder reranker)
+Current:
+  bot-config-api
+    ├── bot CRUD / deploy
+    ├── knowledge (ingest, search, lifecycle)  ← EXTRACT
+    ├── A2A protocol
+    └── workflow integration
+
+Target:
+  bot-config-api                  knowledge-api (NEW)
+    ├── bot CRUD / deploy           ├── ingest (chunking, embedding, Qdrant write)
+    ├── A2A protocol                ├── search (vector, BM25, RRF, token budget)
+    └── workflow integration        ├── lifecycle (Postgres document_records)
+                                    ├── scope resolution (bot→scope index)
+                                    └── health / metrics
+
+  gateway
+    └── knowledge-retrieval plugin → calls knowledge-api (not bot-config-api)
 ```
 
-**Key benchmarks**:
-- [Pinecone reports **48% improvement**](https://superlinked.com/vectorhub/articles/optimizing-rag-with-hybrid-search-reranking) in retrieval quality using hybrid + reranker vs single-method
-- [Hybrid search alone improves recall by **1-9%**](https://superlinked.com/vectorhub/articles/optimizing-rag-with-hybrid-search-reranking) depending on implementation
-- [Cross-encoder reranking adds **+28% nDCG@10**](https://www.zeroentropy.dev/articles/ultimate-guide-to-choosing-the-best-reranking-model-in-2025) (ZeroEntropy zerank-1 benchmark)
+**What changes**:
+- New `knowledge-api` FastAPI service with its own Dockerfile, Helm chart, ArgoCD app
+- Gateway plugin `apiUrl` points to `knowledge-api` instead of `bot-config-api`
+- `bot-config-api` no longer imports knowledge modules
+- Shared Postgres (same DB, different tables) and shared Qdrant (same instance, scoped collections)
 
-**Critical insight from industry**: ["A reranker can only reorder what your retrieval system already found. If the relevant document is at position 200 and you only pass top-50 to the reranker, the reranker never sees it."](https://docs.bswen.com/blog/2026-02-25-hybrid-search-vs-reranker/) This confirms our **"recall before precision"** approach: hybrid first, reranker second.
+**What stays shared**:
+- Qdrant instance (collection-per-scope isolation is sufficient)
+- Postgres instance (knowledge tables are already independent)
+- Vault secrets (same OPENROUTER_API_KEY)
 
-**Agentopia alignment**: Our recommended Phase 2 (hybrid via Qdrant native) → conditional reranker matches industry best practice exactly.
+**Benefits**:
+- Independent scaling: knowledge ingest can burst without affecting bot API
+- Independent deployment: knowledge code changes don't require bot-config-api redeploy
+- Clear domain boundary: knowledge service owns its data model entirely
+- Easier to add hybrid search, reranker, caching as internal concerns
+- Testing in isolation: knowledge service has its own test suite
 
-### H2. Qdrant Native Hybrid Search — Production-Ready Since v1.15
+**Migration approach** (non-breaking):
+1. Extract code into new service, keep API contract identical
+2. Deploy knowledge-api alongside bot-config-api
+3. Update gateway plugin + bot-config-api proxy to route to knowledge-api
+4. Remove knowledge code from bot-config-api
+5. Each step is a separate PR, rollback-safe
 
-**Critical finding for our architecture**: Qdrant v1.15+ (we run v1.16.1) has [**native BM25 support with server-side IDF computation**](https://qdrant.tech/articles/sparse-vectors/). This is a significant upgrade from earlier versions:
-
-- [BM25 sparse vector conversion happens **directly in Qdrant**](https://qdrant.tech/articles/sparse-vectors/) (no external tokenizer needed for basic use)
-- [IDF computation is server-side](https://github.com/qdrant/qdrant/issues/6690) — no need to maintain global term frequency tables
-- [Hybrid search executes in **one request** via prefetch + RRF fusion](https://qdrant.tech/articles/hybrid-search/)
-- [Rust + SIMD-optimized inverted index](https://qdrant.tech/articles/sparse-embeddings-ecommerce-part-1/) keeps latency low
-
-This means our Phase 2 can be even simpler than originally proposed — Qdrant handles BM25 internally.
-
-### H3. Anthropic's Contextual Retrieval — High-Impact Technique
-
-Anthropic published [**Contextual Retrieval**](https://www.anthropic.com/news/contextual-retrieval) (Sep 2024), now validated in production across [codebases, scientific papers, and fiction](https://www.datacamp.com/tutorial/contextual-retrieval-anthropic):
-
-**How it works**: Before embedding each chunk, [prepend a short (50-100 token) LLM-generated context](https://www.anthropic.com/news/contextual-retrieval) explaining what the chunk is about within the full document. [AWS Bedrock has native support](https://aws.amazon.com/blogs/machine-learning/contextual-retrieval-in-anthropic-using-amazon-bedrock-knowledge-bases/) for this technique.
-
-**Benchmark results** ([source: Anthropic](https://www.anthropic.com/news/contextual-retrieval)):
-| Technique | Retrieval Failure Rate Reduction |
-|---|---|
-| Contextual Embeddings alone | **-35%** (5.7% → 3.7%) |
-| Contextual Embeddings + Contextual BM25 | **-49%** (5.7% → 2.9%) |
-| Above + Reranking | **-67%** (5.7% → 1.9%) |
-
-**Cost**: [$1.02 per million document tokens](https://www.anthropic.com/news/contextual-retrieval) (one-time at ingest, using a fast model like Gemini Flash)
-
-**Agentopia applicability**: This is a **high-ROI ingestion improvement** that could slot into Phase 3. It requires one LLM call per chunk at ingest time (using our existing Gemini Flash via OpenRouter). The cost is negligible for knowledge bases under 100K documents.
-
-**Debate position**: This should be **promoted from "future enhancement" to Phase 3 candidate**, ahead of semantic chunking, because:
-1. Anthropic's benchmarks show 49% failure rate reduction — larger impact than chunking strategy changes
-2. Implementation is straightforward (prepend context to chunk before embedding)
-3. We already have the LLM infrastructure (OpenRouter + Gemini Flash)
-4. One-time cost at ingest, zero cost at query time
-
-### H4. Reranker Landscape (2026)
-
-Current top rerankers with benchmarks:
-
-| Model | Type | nDCG@10 | Latency | Cost | License |
-|---|---|---|---|---|---|
-| **BAAI/bge-reranker-v2-m3** | Cross-encoder (278M) | 51.8 (BEIR) | ~100ms GPU | $0 (self-hosted) | Apache 2.0 |
-| **Cohere Rerank** | API | ~55+ | ~200ms | ~$1/1K queries | Commercial |
-| **Jina Reranker v3** | Cross-encoder | 81.3% Hit@1 | 188ms | $0 (self-hosted) | Apache 2.0 |
-| **mxbai-rerank-v2** | Cross-encoder | Competitive | ~150ms | $0 (self-hosted) | Apache 2.0 |
-| **ZeroEntropy zerank-1** | Cross-encoder | +28% nDCG@10 | ~200ms | Commercial | Commercial |
-
-**For Agentopia (if reranker needed)**:
-- **First choice**: Cohere Rerank API — lowest operational burden, proven quality
-- **Cost-optimized**: BAAI/bge-reranker-v2-m3 self-hosted — Apache 2.0, 278M params runs on CPU for <100 pairs
-- **k3s constraint**: Limited GPU on server36 → API reranker may be more practical than self-hosted
-
-### H5. RAG Evaluation — RAGAS Framework
-
-[**RAGAS**](https://docs.ragas.io/en/stable/getstarted/rag_eval/) (Retrieval Augmented Generation Assessment) is the [most widely adopted open-source RAG evaluation framework](https://www.evidentlyai.com/llm-guide/rag-evaluation), grown from a [2023 research paper (arXiv:2309.15217)](https://arxiv.org/abs/2309.15217):
-
-**Key metrics** ([full list](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/)):
-- **Faithfulness**: % of claims in answer that are grounded in retrieved context
-- **Answer Relevancy**: Semantic similarity between answer and question
-- **Context Precision**: % of retrieved chunks that are relevant
-- **Context Recall**: % of relevant chunks that were retrieved
-
-**How it works**: Uses LLM-as-judge ([reference-free evaluation](https://docs.ragas.io/en/stable/concepts/metrics/) — no human labels needed for basic eval). Can run fully automated in CI. [Python-native integration](https://docs.ragas.io/en/stable/getstarted/rag_eval/).
-
-**Agentopia applicability**: RAGAS can be our Phase 1 evaluation framework:
-1. Integrates with Python (our backend is Python)
-2. Reference-free evaluation (no golden dataset needed for basic metrics)
-3. Can use existing OpenRouter LLM (Gemini Flash) as judge
-4. CI-runnable for regression detection
-
-**Debate position**: Using RAGAS for Phase 1 eval significantly reduces the "golden dataset" dependency. We can run faithfulness + context precision checks without manually curated Q&A pairs. Golden dataset refines accuracy but isn't a prerequisite.
-
-### H6. Agentic RAG vs Injection-Based RAG
-
-**Industry trend**: [Agentic RAG](https://arxiv.org/abs/2501.09136) (tool-based, multi-hop) is gaining traction. [IBM defines it as retrieval becoming a control loop](https://www.ibm.com/think/topics/agentic-rag): retrieve → reason → decide → retrieve again or stop.
-
-**Current Agentopia approach**: Injection-based (auto-inject knowledge before LLM turn). This is the right choice for our use case because:
-
-1. **Predictable latency** — single retrieval pass, no multi-hop loops. ["Classic RAG is most effective when predictable cost and latency are priorities"](https://towardsdatascience.com/agentic-rag-vs-classic-rag-from-a-pipeline-to-a-control-loop/)
-2. **Guaranteed knowledge use** — LLM always sees relevant docs, doesn't decide whether to search
-3. **Simple observability** — one retrieval per query, easy to trace. ["Introducing loops and tool calls increases adaptability but reduces predictability"](https://towardsdatascience.com/agentic-rag-vs-classic-rag-from-a-pipeline-to-a-control-loop/)
-4. **Lower cost** — no iterative LLM calls for retrieval planning
-
-**When to evolve**: Consider agentic RAG only if:
-- Users need multi-hop reasoning across multiple knowledge scopes
-- Single-pass retrieval consistently misses relevant context
-- Industry confirms: ["enterprises are blending the two — agents orchestrate when and how to retrieve; RAG remains the grounding mechanism"](https://datanucleus.dev/rag-and-agentic-ai/what-is-rag-enterprise-guide-2025)
-
-**Debate position**: Keep injection-based for production. Agentic RAG is a **Phase 4+ evolution**, not a production requirement.
-
-### H7. Enterprise RAG Production Stats
-
-- [**63.6%** of enterprise RAG implementations use GPT-based models](https://www.mdpi.com/2076-3417/16/1/368) (our multi-provider approach is differentiated)
-- [**80.5%** rely on FAISS or Elasticsearch](https://www.mdpi.com/2076-3417/16/1/368) (our Qdrant choice is modern and has native hybrid)
-- [Integrating retrieval **reduces hallucinations by 47%**](https://www.aplyca.com/en/blog/ultimate-guide-to-rag-for-enterprise-use-cases-platforms-and-production-best) compared to standalone LLM
-- [Gap between working RAG prototype and production spans **months of engineering effort**](https://introl.com/blog/rag-infrastructure-production-retrieval-augmented-generation-guide)
+**Timing**: Start extraction in Phase 2 alongside hybrid search. The hybrid search code naturally goes into the new service.
 
 ---
 
-## I. Revised Recommendations After Market Research
-
-### What Changes
-
-| Original Recommendation | Market Research Impact | Revised |
-|---|---|---|
-| Phase 1 requires golden dataset | RAGAS enables reference-free eval | **Phase 1 can start without golden dataset** using RAGAS faithfulness + context precision |
-| Phase 2 hybrid search needs code-level BM25 | Qdrant v1.15+ has native server-side BM25 | **Phase 2 is simpler** — use Qdrant native BM25, no external tokenizer |
-| Semantic chunking as Phase 3 | Anthropic Contextual Retrieval shows 49% failure reduction | **Phase 3 should prioritize Contextual Retrieval over semantic chunking** |
-| Reranker choice unclear | Market data: Cohere API for low-ops, BAAI for cost | **Cohere API first** (if needed), BAAI for cost optimization later |
-
-### What Stays The Same
-
-- Phase 0 (foundation hardening) — still required, market research confirms observability is critical
-- Graph RAG deferred — industry confirms "agents orchestrate, RAG grounds" — core retrieval first
-- Injection-based over agentic — correct for our use case (predictable, guaranteed, observable)
-- Qdrant native over external search — confirmed, Qdrant hybrid is production-ready
-
-### Updated Phase Summary
+## K. Final Recommended Production Path
 
 ```
 Phase 0: Foundation Hardening
-  → Retry/circuit breaker, Helm config, health checks
+  → Helm config fix, retry/circuit breaker, health checks, env vars
+  → Scope: 1-2 PRs, code-only
 
-Phase 1: Evaluation Baseline (using RAGAS)
-  → Reference-free eval first, golden dataset later
-  → Complete #307 live pilot in parallel
+Phase 1a: RAGAS Early Signal (immediate after Phase 0)
+  → Reference-free faithfulness + context precision
+  → Directional regression check in CI
 
-Phase 2: Hybrid Search (Qdrant native BM25 + dense + RRF)
-  → $0 infra cost, server-side BM25
-  → Eval gate: ≥10% nDCG@5 improvement
+Phase 1b: Labeled Evaluation Baseline (after #307 pilot)
+  → Golden dataset from client data
+  → nDCG@5, MRR, Precision@5 — authoritative quality gate
 
-Phase 3: Contextual Retrieval (Anthropic technique)
-  → LLM-generated chunk context at ingest time
-  → Proven -49% retrieval failure rate
-  → Cost: ~$1/1M tokens (one-time, using Gemini Flash)
+Phase 2: Hybrid Search + Service Extraction
+  → Qdrant native BM25 + RRF fusion ($0 infra)
+  → Extract knowledge-api from bot-config-api
+  → MUST pass labeled nDCG@5 ≥ 10% improvement gate
 
-Phase 4+: Conditional
-  → Reranker (only if Phase 2 eval insufficient)
-  → Semantic chunking (only if Phase 3 eval shows chunk quality gap)
-  → Agentic RAG (only if multi-hop demand proven)
-  → Graph RAG (deferred, no current demand)
+Phase 3+: CONDITIONAL — evidence-driven only
+  → Contextual Retrieval, reranker, semantic chunking — all candidates
+  → Each requires Agentopia-specific eval data before commitment
+
+DEFERRED: Graph RAG, Agentic RAG, auto-ingestion, multilingual
 ```
 
 ---
 
-> All claims in this document are linked inline to their sources. Key references:
-> [Qdrant Hybrid Search](https://qdrant.tech/articles/hybrid-search/) |
-> [Qdrant BM25 Sparse Vectors](https://qdrant.tech/articles/sparse-vectors/) |
-> [Anthropic Contextual Retrieval](https://www.anthropic.com/news/contextual-retrieval) |
-> [RAGAS Eval Framework](https://docs.ragas.io/en/stable/concepts/metrics/) |
-> [Superlinked Hybrid + Reranking Analysis](https://superlinked.com/vectorhub/articles/optimizing-rag-with-hybrid-search-reranking) |
-> [Enterprise RAG Systematic Review (MDPI)](https://www.mdpi.com/2076-3417/16/1/368) |
-> [Agentic vs Classic RAG (TDS)](https://towardsdatascience.com/agentic-rag-vs-classic-rag-from-a-pipeline-to-a-control-loop/)
+> All claims are linked inline to sources. Evidence is separated into repo-proven (Sections A-E, J) and external directional (Section H).
 
 *This debate document is READY_FOR_CTO_REVIEW.*
