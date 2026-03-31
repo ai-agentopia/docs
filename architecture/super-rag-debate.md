@@ -9,7 +9,7 @@ description: "Formal debate on production-ready Super RAG for Agentopia. Grounde
 > **Participants**: CTO, Platform/DevOps
 > **Status**: READY_FOR_CTO_REVIEW
 > **Assumption**: English-first production. Vietnamese/multilingual is optional enhancement.
-> **Revision**: v4 — fixes operator auth contract (in-memory session not portable), adds non-restart binding reconcile, proxy-first migration model
+> **Revision**: v5 — fixes future-as-implemented wording, resolves bot bearer verification decision
 
 ---
 
@@ -261,7 +261,7 @@ XML injection into LLM context             ← existing
 |---|---|
 | **S2b.1** Create knowledge-api service | New FastAPI service, Dockerfile, Helm chart, ArgoCD app |
 | **S2b.2** Implement binding sync + reconcile | `POST /internal/bindings/sync` webhook, cache-miss CRD fallback, periodic 5min reconcile |
-| **S2b.3** Implement auth layer | Bot bearer (direct K8s Secret read) + internal service token for proxied operator requests. NO independent session middleware. (see Section J3) |
+| **S2b.3** Implement auth layer | Bot bearer via K8s Secret read (RBAC scoped to `agentopia-gateway-env-*`) + internal service token for proxied operator requests. NO independent session middleware. (see Section J3) |
 | **S2b.4** Deploy alongside bot-config-api (proxy model) | bot-config-api terminates operator auth, proxies `/api/v1/knowledge/*` to knowledge-api with `X-Internal-Service` + `INTERNAL_SERVICE_TOKEN` |
 | **S2b.5** Switch gateway plugin target | Update Helm `apiUrl` to knowledge-api directly (bot bearer auth, no session) |
 | **S2b.6** Remove knowledge code from bot-config-api | After stable operation period |
@@ -341,7 +341,7 @@ XML injection into LLM context             ← existing
 | Contextual Retrieval | **CONDITIONAL candidate** | External: [Anthropic benchmarks](https://www.anthropic.com/news/contextual-retrieval). Needs Agentopia-specific validation |
 | Semantic chunking | **CONDITIONAL candidate** | Repo: enum defined, not implemented. Needs eval data |
 | External search engine | **REJECTED** | Qdrant native sufficient. <10K docs year 1 |
-| Knowledge service extraction | **RECOMMENDED — separate track from retrieval** | Repo: coupled to bot deploy flow. See Section J |
+| Knowledge service extraction | **RECOMMENDED — separate track from retrieval** | Repo: coupled to bot deploy flow. Proxy-first auth, K8s Secret bearer verification, 3-strategy reconcile. See Section J |
 
 ---
 
@@ -492,15 +492,15 @@ Bot deploy/PATCH (bot-config-api)
                                         reconcile handles eventual consistency (see below)
 ```
 
-**Non-restart reconcile strategies** (all three implemented):
+**Required reconcile strategies for Phase 2b** (must be implemented during knowledge-api extraction):
 
-1. **Cache-miss CRD fallback** — when `resolve(bot_name)` returns empty (cache miss), knowledge-api performs a live CRD annotation lookup before returning "no scopes". This closes the window for newly deployed bots whose sync webhook was missed. Cost: one K8s API call per cache miss (rare on hot path).
+1. **Cache-miss CRD fallback** (proposed) — when `resolve(bot_name)` returns empty (cache miss), knowledge-api must perform a live CRD annotation lookup before returning "no scopes". This closes the window for newly deployed bots whose sync webhook was missed. Cost: one K8s API call per cache miss (rare on hot path).
 
-2. **Periodic background reconciliation** — background task runs `rebuild_from_k8s()` every 5 minutes (configurable via `BINDING_RECONCILE_INTERVAL_SECONDS`). Catches any drift from missed webhooks, manual CRD edits, or partial failures. Bounded staleness: max 5 minutes.
+2. **Periodic background reconciliation** (proposed) — background task must run `rebuild_from_k8s()` every 5 minutes (configurable via `BINDING_RECONCILE_INTERVAL_SECONDS`). Catches any drift from missed webhooks, manual CRD edits, or partial failures. Bounded staleness: max 5 minutes.
 
-3. **Startup full rebuild** — existing `rebuild_from_k8s()` on service start (unchanged). Handles pod restart/reschedule.
+3. **Startup full rebuild** (existing pattern) — `rebuild_from_k8s()` on service start. Already implemented in `bot_knowledge_index.py` within bot-config-api. Must be carried over to knowledge-api.
 
-**Stale binding window**: With cache-miss fallback, a newly deployed bot's first search triggers a live lookup — **zero stale window for new bindings**. For binding updates (scope change on existing bot), periodic reconcile bounds staleness to the reconcile interval. Acceptable for scope changes which are operator-initiated and infrequent.
+**Expected stale binding window**: With cache-miss fallback, a newly deployed bot's first search triggers a live lookup — **zero stale window for new bindings**. For binding updates (scope change on existing bot), periodic reconcile bounds staleness to the reconcile interval. Acceptable for scope changes which are operator-initiated and infrequent.
 
 **Auth after extraction**:
 
@@ -511,9 +511,15 @@ Bot deploy/PATCH (bot-config-api)
 | Auth path | Termination | How |
 |---|---|---|
 | **Operator session** | **bot-config-api terminates auth** (existing session middleware) | UI continues calling bot-config-api; bot-config-api proxies `/api/v1/knowledge/*` to knowledge-api with internal service header |
-| **Bot bearer** | knowledge-api verifies relay token directly | Option A: read K8s Secret (needs RBAC). Option B: bot-config-api passes token hash during binding sync |
+| **Bot bearer** | knowledge-api verifies relay token directly via K8s Secret read | Reads `agentopia-gateway-env-{bot}` Secret. Requires RBAC `get` on Secrets in `agentopia` namespace. Same pattern as current `_verify_bot_bearer()` in bot-config-api. |
 | **Gateway plugin** | Calls knowledge-api directly (Helm `apiUrl` updated) | Clean — URL-agnostic contract. Bot bearer auth, no session cookie. |
 | **UI** | Calls **bot-config-api** (proxied to knowledge-api) | Operator session stays on bot-config-api; knowledge-api receives pre-authenticated requests via internal header |
+
+**Bot bearer verification decision**:
+- **Recommended**: Direct K8s Secret read. knowledge-api reads `agentopia-gateway-env-{bot}` to verify relay tokens, identical to the current `_verify_bot_bearer()` implementation in bot-config-api.
+- **Why preferred**: Zero runtime dependency on bot-config-api for the gateway hot path. No additional network hop. Same code pattern — lift and shift from bot-config-api. K8s RBAC (`get` on Secrets) is a standard, auditable permission.
+- **Tradeoff**: knowledge-api ServiceAccount needs RBAC read access to bot Secrets. This is a narrow permission (read-only, scoped to `agentopia-gateway-env-*` naming convention), not a broad cluster privilege.
+- **Alternative rejected**: Passing token hash during binding sync was considered. Rejected because it couples auth verification to the sync path — a missed sync webhook would leave knowledge-api unable to verify tokens for that bot until the next reconcile cycle. Direct Secret read is always current.
 
 **Internal service auth for proxied requests**: bot-config-api adds `X-Internal-Service: bot-config-api` + shared `INTERNAL_SERVICE_TOKEN` header. knowledge-api trusts requests with valid internal token — no session cookie needed on the knowledge-api side.
 
