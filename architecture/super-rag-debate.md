@@ -238,28 +238,46 @@ XML injection into LLM context             ← existing
 
 **Dependency**: Phase 1b requires first client documents (#307). Phase 1a can start immediately after Phase 0.
 
-### Phase 2: Retrieval Quality (Hybrid Search)
+### Phase 2a: Hybrid Retrieval (within current boundary)
+
+**Why within current boundary**: If retrieval quality or latency changes, we know it's the retrieval logic, not topology.
 
 | Task | Description |
 |---|---|
-| **R2.1** Enable Qdrant native BM25 | Sparse vector config + text tokenization per collection |
-| **R2.2** Implement hybrid search | Vector + BM25 parallel query via Qdrant prefetch API |
-| **R2.3** Implement RRF fusion | `score = 1/(k + rank_vector) + 1/(k + rank_text)` |
-| **R2.4** Collection migration | Re-create collections with BM25 support (migration script) |
-| **R2.5** Observability metrics | Prometheus counters/histograms for retrieval stack |
-| **R2.6** **Labeled eval gate** | Require nDCG@5 ≥ 10% improvement over Phase 1b baseline. **Must use labeled metrics, not RAGAS.** |
+| **R2a.1** Enable Qdrant native BM25 | Sparse vector config + text tokenization per collection |
+| **R2a.2** Implement hybrid search | Vector + BM25 parallel query via Qdrant prefetch API |
+| **R2a.3** Implement RRF fusion | `score = 1/(k + rank_vector) + 1/(k + rank_text)` |
+| **R2a.4** Collection migration | Re-create collections with BM25 support (migration script) |
+| **R2a.5** Observability metrics | Prometheus counters/histograms for retrieval stack |
+| **R2a.6** **Labeled eval gate** | Require nDCG@5 ≥ 10% improvement over Phase 1b baseline. **Must use labeled metrics, not RAGAS.** |
 
-**Cost**: $0 — Qdrant native features.
+**Cost**: $0 — Qdrant native features. Code changes only.
+
+### Phase 2b: Knowledge-API Extraction (separate track, after 2a stabilizes)
+
+**Prerequisite**: Phase 2a hybrid search is stable and baselined.
+
+| Task | Description |
+|---|---|
+| **S2b.1** Create knowledge-api service | New FastAPI service, Dockerfile, Helm chart, ArgoCD app |
+| **S2b.2** Implement binding sync endpoint | `POST /internal/bindings/sync` — bot-config-api notifies on deploy/PATCH |
+| **S2b.3** Implement auth layer | Operator session + bot bearer token verification (see Section J3) |
+| **S2b.4** Deploy alongside bot-config-api | bot-config-api proxies `/api/v1/knowledge/*` to knowledge-api |
+| **S2b.5** Switch gateway plugin target | Update Helm `apiUrl` to knowledge-api directly |
+| **S2b.6** Remove knowledge code from bot-config-api | After stable operation period |
+| **S2b.7** **Topology gate** | Retrieval latency p95 must not increase >200ms vs Phase 2a baseline. Rollback tested. |
+
+**Why separate from 2a**: Cannot diagnose regression root cause if retrieval logic and service topology change simultaneously.
 
 ### Phase 3+: Conditional Experiments (only if Phase 1/2 data justifies)
 
-**No default recommendation for Phase 3.** All options are candidates, not commitments:
+**No default recommendation.** All options are candidates, not commitments:
 
 | Candidate | Trigger Condition | External Evidence |
 |---|---|---|
-| **Contextual Retrieval** | Phase 2 eval shows ingestion-side chunk quality limits recall | [Anthropic: -49% failure rate](https://www.anthropic.com/news/contextual-retrieval), [$1.02/1M tokens one-time](https://www.anthropic.com/news/contextual-retrieval) |
+| **Contextual Retrieval** | Phase 2a eval shows ingestion-side chunk quality limits recall | [Anthropic: -49% failure rate](https://www.anthropic.com/news/contextual-retrieval), [$1.02/1M tokens one-time](https://www.anthropic.com/news/contextual-retrieval) |
 | **Semantic chunking** | Phase 1 eval shows fixed-size chunking breaks semantic boundaries | Defined in code enum, not yet implemented |
-| **Reranker** | Phase 2 labeled nDCG@5 plateaus below target | [+28% nDCG@10 possible](https://www.zeroentropy.dev/articles/ultimate-guide-to-choosing-the-best-reranking-model-in-2025) |
+| **Reranker** | Phase 2a labeled nDCG@5 plateaus below target | [+28% nDCG@10 possible](https://www.zeroentropy.dev/articles/ultimate-guide-to-choosing-the-best-reranking-model-in-2025) |
 | **Query expansion** | Phase 1 eval shows short/ambiguous queries have low recall | External directional evidence only |
 
 **Each candidate requires Agentopia-specific eval data before promotion to committed path.**
@@ -285,9 +303,9 @@ XML injection into LLM context             ← existing
 
 **YES, as Layer 1 early signal only.** RAGAS provides reference-free faithfulness/context precision checks without golden data. But it does NOT replace labeled retrieval metrics (nDCG/MRR). Phase 1 has two sub-phases: 1a (RAGAS, immediate) and 1b (labeled baseline, after #307 client data).
 
-### 3. Approve Qdrant native hybrid as Phase 2?
+### 3. Approve Qdrant native hybrid as Phase 2a?
 
-**YES.** Zero infrastructure cost. Uses Qdrant features already deployed but unused. Eval gate uses **labeled nDCG@5**, not RAGAS.
+**YES.** Zero infrastructure cost. Uses Qdrant features already deployed but unused. Eval gate uses **labeled nDCG@5**, not RAGAS. Service extraction (Phase 2b) follows after hybrid baseline stabilizes — **not bundled**.
 
 ### 4. Approve Graph RAG deferral?
 
@@ -303,7 +321,7 @@ XML injection into LLM context             ← existing
 | Level | Items |
 |---|---|
 | **REQUIRED for production** | Phase 0, #307 completion, RAGAS early signal, basic observability |
-| **REQUIRED for quality claims** | Phase 1b labeled baseline, Phase 2 with labeled eval gate |
+| **REQUIRED for quality claims** | Phase 1b labeled baseline, Phase 2a hybrid with labeled eval gate |
 | **CONDITIONAL** | All Phase 3+ candidates — evidence-driven only |
 | **DEFERRED** | Graph RAG, Agentic RAG, auto-ingestion, multilingual |
 
@@ -316,13 +334,14 @@ XML injection into LLM context             ← existing
 | Phase 0 before evaluation | **RECOMMENDED** | Repo: known fragility in code |
 | RAGAS as early signal | **RECOMMENDED** | External: [RAGAS framework](https://docs.ragas.io/en/stable/concepts/metrics/). Limitation: not a substitute for labeled metrics |
 | Labeled nDCG/MRR as authoritative gate | **RECOMMENDED** | Industry standard: [nDCG correlates with RAG quality](https://labelyourdata.com/articles/llm-fine-tuning/rag-evaluation) |
-| Hybrid search via Qdrant native | **RECOMMENDED** | Repo: Qdrant v1.16.1 deployed. External: [native BM25 since v1.15](https://qdrant.tech/articles/sparse-vectors/) |
-| Reranker | **DEFERRED** | Conditional on Phase 2 labeled eval |
+| Hybrid search via Qdrant native (Phase 2a) | **RECOMMENDED** | Repo: Qdrant v1.16.1 deployed. External: [native BM25 since v1.15](https://qdrant.tech/articles/sparse-vectors/) |
+| Knowledge-api extraction (Phase 2b) | **RECOMMENDED — separate track** | Repo: coupled but extractable. After 2a stabilizes. See Section J |
+| Reranker | **DEFERRED** | Conditional on Phase 2a labeled eval |
 | Graph RAG | **DEFERRED** | No demand, high complexity |
 | Contextual Retrieval | **CONDITIONAL candidate** | External: [Anthropic benchmarks](https://www.anthropic.com/news/contextual-retrieval). Needs Agentopia-specific validation |
 | Semantic chunking | **CONDITIONAL candidate** | Repo: enum defined, not implemented. Needs eval data |
 | External search engine | **REJECTED** | Qdrant native sufficient. <10K docs year 1 |
-| Knowledge service extraction | **RECOMMENDED for Phase 2** | Repo: monolithic bot-config-api. See Section J |
+| Knowledge service extraction | **RECOMMENDED — separate track from retrieval** | Repo: coupled to bot deploy flow. See Section J |
 
 ---
 
@@ -373,126 +392,165 @@ Production RAG has converged on three stages: recall → fusion → precision.
 
 ---
 
-## J. Service Architecture Assessment — Microservice Readiness
+## J. Service Architecture Assessment — Knowledge-API Extraction
 
-> **Client requirement**: RAG components should be extractable to independent services, not locked into a monolithic bot-config-api or gateway.
+> **Client requirement**: RAG components should be extractable to independent services, not locked into a monolithic bot-config-api.
 
-### Current State (repo-proven)
+### J1. Current State (repo-proven)
 
-All knowledge/RAG logic currently lives inside **`bot-config-api`**:
+All knowledge/RAG logic lives inside **`bot-config-api`** (~1,700 lines):
 
-| Module | Location | Responsibility | Lines |
+| Module | Location | Lines | Responsibility |
 |---|---|---|---|
-| `knowledge.py` | `bot-config-api/src/services/` | KnowledgeService, QdrantBackend, chunking, embedding, search | ~780 |
-| `knowledge router` | `bot-config-api/src/routers/` | REST API: ingest, search, delete, lifecycle | ~350 |
-| `document_store.py` | `bot-config-api/src/services/` | PostgresDocumentStore, lifecycle management | ~270 |
-| `bot_knowledge_index.py` | `bot-config-api/src/services/` | Bot→scope binding resolution | ~135 |
-| `knowledge models` | `bot-config-api/src/models/` | Pydantic schemas | ~170 |
-| **Total** | | | **~1,700 lines** |
+| `knowledge.py` | `services/` | ~780 | KnowledgeService, QdrantBackend, chunking, embedding, search |
+| `knowledge router` | `routers/` | ~350 | REST API: ingest, search, delete, lifecycle |
+| `document_store.py` | `services/` | ~270 | PostgresDocumentStore, lifecycle management |
+| `bot_knowledge_index.py` | `services/` | ~135 | Bot→scope binding resolution |
+| `knowledge models` | `models/` | ~170 | Pydantic schemas |
 
-Gateway side:
-| Module | Location | Responsibility | Lines |
-|---|---|---|---|
-| `knowledge-retrieval/index.ts` | `gateway/extensions/` | Plugin: query → API call → XML injection | ~230 |
+`bot-config-api` also owns: bot CRUD/deploy, SOUL/USER generation, A2A protocol, Temporal workflow integration, usage metrics.
 
-### Problem Analysis
+### J2. Coupling Analysis — Honest Assessment
 
-**bot-config-api has too many responsibilities**:
-1. Bot CRUD + deployment (Application CRD management)
-2. SOUL/USER prompt generation
-3. Knowledge ingestion + search + lifecycle
-4. A2A protocol server
-5. Workflow/Temporal integration
-6. Usage metrics
+Knowledge is a **strong candidate for extraction, but not a trivial decoupling**. It remains coupled to:
 
-Knowledge is **~1,700 lines** of domain-specific logic (embedding, chunking, vector search, document lifecycle) that shares nothing with bot deployment except the Qdrant connection and Postgres instance.
+#### Coupling 1: Bot→Scope Binding Lifecycle
 
-**Risks of keeping it monolithic**:
-- Embedding API circuit breaker affects bot deployment availability
-- Knowledge ingest load (CPU-intensive chunking + API calls) competes with bot-config-api request handling
-- Cannot scale knowledge processing independently
-- Cannot deploy knowledge service updates without redeploying bot-config-api
-- Harder to test knowledge in isolation
-
-### Extraction Plan — `knowledge-api` Service
-
-**Recommended for Phase 2** (when hybrid search adds complexity):
+**Source of truth**: K8s Application CRD annotations.
 
 ```
-Current:
-  bot-config-api
-    ├── bot CRUD / deploy
-    ├── knowledge (ingest, search, lifecycle)  ← EXTRACT
-    ├── A2A protocol
-    └── workflow integration
-
-Target:
-  bot-config-api                  knowledge-api (NEW)
-    ├── bot CRUD / deploy           ├── ingest (chunking, embedding, Qdrant write)
-    ├── A2A protocol                ├── search (vector, BM25, RRF, token budget)
-    └── workflow integration        ├── lifecycle (Postgres document_records)
-                                    ├── scope resolution (bot→scope index)
-                                    └── health / metrics
-
-  gateway
-    └── knowledge-retrieval plugin → calls knowledge-api (not bot-config-api)
+Application CRD "agentopia-{bot}" (argocd namespace)
+  metadata.annotations:
+    agentopia/client-id: "{client_id}"
+    agentopia/knowledge-scopes: '["{scope1}", "{scope2}"]'
 ```
 
-**What changes**:
-- New `knowledge-api` FastAPI service with its own Dockerfile, Helm chart, ArgoCD app
-- Gateway plugin `apiUrl` points to `knowledge-api` instead of `bot-config-api`
-- `bot-config-api` no longer imports knowledge modules
-- Shared Postgres (same DB, different tables) and shared Qdrant (same instance, scoped collections)
+**Who writes**: `bot-config-api` deploy router — `persist_to_k8s()` patches annotation during bot deploy/PATCH.
+**Who reads**: `BotKnowledgeIndex` singleton — `rebuild_from_k8s()` on startup, `resolve()` on every search.
+**Runtime cache**: In-memory dict `bot_name → BotKnowledgeBinding`, O(1) lookup on hot path.
 
-**What stays shared**:
-- Qdrant instance (collection-per-scope isolation is sufficient)
-- Postgres instance (knowledge tables are already independent)
-- Vault secrets (same OPENROUTER_API_KEY)
+**Problem for extraction**: If knowledge-api is separate, who owns this binding?
+- Deploy endpoint (bot-config-api) creates the CRD and writes the annotation
+- Knowledge search endpoint (knowledge-api) needs to resolve bot→scopes
+- Two services reading/writing the same CRD annotation = ownership conflict
 
-**Benefits**:
-- Independent scaling: knowledge ingest can burst without affecting bot API
-- Independent deployment: knowledge code changes don't require bot-config-api redeploy
-- Clear domain boundary: knowledge service owns its data model entirely
-- Easier to add hybrid search, reranker, caching as internal concerns
-- Testing in isolation: knowledge service has its own test suite
+#### Coupling 2: Auth/Token Verification
 
-**Migration approach** (non-breaking):
-1. Extract code into new service, keep API contract identical
-2. Deploy knowledge-api alongside bot-config-api
-3. Update gateway plugin + bot-config-api proxy to route to knowledge-api
-4. Remove knowledge code from bot-config-api
-5. Each step is a separate PR, rollback-safe
+**Bot bearer auth** on knowledge search:
+1. Gateway sends `Authorization: Bearer {AGENTOPIA_RELAY_TOKEN}` + `X-Bot-Name` header
+2. Knowledge router calls `_verify_bot_bearer()` → reads K8s Secret `agentopia-gateway-env-{bot}`
+3. Time-constant comparison of token values
 
-**Timing**: Start extraction in Phase 2 alongside hybrid search. The hybrid search code naturally goes into the new service.
+**Operator auth**: Cookie session middleware on `bot-config-api`.
+
+**Problem for extraction**: Knowledge-api must verify bot relay tokens. Today this reads K8s Secrets created by `bot-config-api` during deploy. Separate service needs either:
+- Direct K8s Secret read access (elevated permissions)
+- A shared token store (Redis/Postgres)
+- A verification endpoint on bot-config-api (HTTP round-trip on hot path)
+
+#### Coupling 3: Helm Value Patching
+
+When knowledge binding changes (PATCH endpoint), `bot-config-api` calls `K8sService.patch_bot_knowledge_values(enabled=True/False)` → patches Application CRD Helm values → ArgoCD selfHeal triggers pod rollout with plugin enabled/disabled.
+
+**Problem for extraction**: Knowledge-api would need K8s API access to patch Application CRDs, or delegate back to bot-config-api.
+
+#### Coupling 4: Gateway Plugin Contract
+
+Plugin calls `GET /api/v1/knowledge/search` with headers:
+- `Authorization: Bearer {AGENTOPIA_RELAY_TOKEN}`
+- `X-Bot-Name: {bot_name}`
+
+Response: `{ results: SearchResult[], count: number }`
+
+**This contract is URL-agnostic** — plugin's `apiUrl` is configurable via Helm. Changing the target from `bot-config-api` to `knowledge-api` only requires updating the Helm value. **This coupling is clean.**
+
+### J3. Recommended Ownership Model After Extraction
+
+**Bot-config-api retains**:
+- CRD creation/deletion (bot deploy/delete lifecycle)
+- Knowledge binding writes: `persist_to_k8s()` on deploy/PATCH → writes annotation
+- Helm value patching: `knowledgeRetrieval.enabled` toggle
+- Relay token creation (K8s Secret management)
+- Notify knowledge-api of binding changes via internal webhook
+
+**Knowledge-api owns**:
+- Ingestion: chunking, embedding, Qdrant write, document lifecycle
+- Search: vector search, hybrid/BM25, RRF fusion, token budget
+- Scope resolution: maintains its own in-memory index, synced from bot-config-api
+- Auth: verifies bot bearer tokens (own verification, not delegating to bot-config-api)
+- Observability: retrieval-specific Prometheus metrics
+
+**Sync mechanism for bot→scope bindings**:
+
+```
+Bot deploy/PATCH (bot-config-api)
+  ├── Write annotation to CRD (existing)
+  └── POST knowledge-api /internal/bindings/sync
+        body: { bot: "max-sa", client_id: "c1", scopes: ["docs", "api"] }
+        ← knowledge-api updates its in-memory index
+        ← if knowledge-api unavailable: deploy succeeds with warning
+                                        knowledge-api self-heals on restart via rebuild_from_k8s()
+```
+
+**Auth after extraction**:
+
+| Auth path | Termination | How |
+|---|---|---|
+| **Operator session** | knowledge-api owns its own session middleware (same ADMIN_PASSWORD env var) | Independent — no proxy needed |
+| **Bot bearer** | knowledge-api verifies relay token directly | Option A: read K8s Secret (needs RBAC). Option B: bot-config-api passes token hash during binding sync |
+| **Gateway plugin** | Calls knowledge-api directly (Helm `apiUrl` updated) | Clean — URL-agnostic contract |
+| **UI** | Calls knowledge-api directly for scope/doc/search | Clean — same REST contract |
+
+**Rollback path**:
+1. Revert gateway plugin `apiUrl` in Helm to point back to bot-config-api
+2. ArgoCD selfHeal redeploys gateway pods with old target
+3. Knowledge-api pods can remain running (no harm) or be scaled to 0
+4. Bot-config-api still has all knowledge code (removed only after extraction proven stable)
+
+**Compatibility during migration**:
+- Both services run simultaneously
+- bot-config-api proxies `/api/v1/knowledge/*` to knowledge-api (reverse proxy)
+- Clients (gateway, UI) continue calling bot-config-api URL
+- Once stable, update Helm `apiUrl` to knowledge-api directly
+- Remove proxy + knowledge code from bot-config-api
+
+### J4. Why Not Extract Now (Phase 0-1)
+
+1. **Phase 0-1 must stabilize retrieval quality first** — extracting during foundation hardening creates two moving targets
+2. **Hybrid search (Phase 2a) should be proven within current boundary** — if we change topology and retrieval logic simultaneously, regression source is ambiguous
+3. **Service extraction is an infrastructure change** — requires new Dockerfile, Helm chart, ArgoCD app, CI pipeline, health checks. This is a separate workstream from retrieval quality.
 
 ---
 
 ## K. Final Recommended Production Path
 
+### Two Parallel Tracks
+
 ```
-Phase 0: Foundation Hardening
-  → Helm config fix, retry/circuit breaker, health checks, env vars
-  → Scope: 1-2 PRs, code-only
+TRACK A: Retrieval Quality (sequential phases)
+  Phase 0  → Foundation hardening (code-only, 1-2 PRs)
+  Phase 1a → RAGAS early signal (immediate)
+  Phase 1b → Labeled eval baseline (after #307)
+  Phase 2a → Hybrid search within current boundary (Qdrant native BM25 + RRF)
+           → MUST pass labeled nDCG@5 ≥ 10% improvement gate
+  Phase 3+ → Conditional experiments (evidence-driven)
 
-Phase 1a: RAGAS Early Signal (immediate after Phase 0)
-  → Reference-free faithfulness + context precision
-  → Directional regression check in CI
-
-Phase 1b: Labeled Evaluation Baseline (after #307 pilot)
-  → Golden dataset from client data
-  → nDCG@5, MRR, Precision@5 — authoritative quality gate
-
-Phase 2: Hybrid Search + Service Extraction
-  → Qdrant native BM25 + RRF fusion ($0 infra)
-  → Extract knowledge-api from bot-config-api
-  → MUST pass labeled nDCG@5 ≥ 10% improvement gate
-
-Phase 3+: CONDITIONAL — evidence-driven only
-  → Contextual Retrieval, reranker, semantic chunking — all candidates
-  → Each requires Agentopia-specific eval data before commitment
-
-DEFERRED: Graph RAG, Agentic RAG, auto-ingestion, multilingual
+TRACK B: Service Architecture (independent track)
+  Phase 2b → knowledge-api extraction
+           → Starts AFTER Phase 2a hybrid search is stable and baselined
+           → Does NOT change retrieval logic — only topology
+           → Must preserve: operator auth, bot bearer auth, gateway plugin contract, UI contract
+           → Rollback: revert Helm apiUrl to bot-config-api
 ```
+
+**Why separated**: If Phase 2a hybrid search causes quality/latency regression, we know it's retrieval logic. If Phase 2b extraction causes issues, we know it's topology. Cannot diagnose root cause if both change simultaneously.
+
+**Phase 2b gate**: Extraction is complete when:
+1. Knowledge-api runs independently with own health check
+2. Gateway plugin calls knowledge-api directly (Helm apiUrl updated)
+3. All existing knowledge tests pass against knowledge-api
+4. Retrieval latency p95 does not increase >200ms vs Phase 2a baseline
+5. Rollback to bot-config-api proxy is tested and documented
 
 ---
 
