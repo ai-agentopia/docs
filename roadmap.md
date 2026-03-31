@@ -59,17 +59,20 @@ What Agentopia can do today, and where it's headed.
 
 ### SA Knowledge Base for Domain & Project Intelligence
 
-Enabling SA bots to use client-provided domain and project knowledge as a reliable working brain. Production-facing initiative with structured debate phase before implementation.
+SA bots use client-provided domain and project knowledge as a reliable working brain — not just conversation memory, but structured document knowledge with provenance, citation, and governance.
 
-| Capability | Description |
-|---|---|
-| **Domain knowledge ingestion** | Ingest client documents (markdown, PDF, HTML, code) into scoped knowledge bases |
-| **Scoped retrieval** | Retrieve relevant knowledge during bot inference, isolated per scope |
-| **Provenance & citation** | Bot answers cite source documents with filename and section references |
-| **Governance** | Authenticated access, scope-level access control, audit trail |
-| **Quality evaluation** | Defined quality bar, golden test sets, answer contract for production use |
+| Capability | Status | Description |
+|---|---|---|
+| **Client-scoped knowledge model** | Implemented | `{client_id}/{scope_name}` identity, server-side scope resolution, cross-client isolation |
+| **File-upload ingestion** | Implemented | PDF, HTML, markdown, text, code — with SHA-256 hashing, two-phase replace, tombstone lifecycle |
+| **Runtime retrieval injection** | Implemented | Gateway plugin (priority 10), auto-injects domain context before LLM inference |
+| **Provenance & citation** | Implemented | Bot answers cite [N] source documents with filename, section, ingested_at timestamp |
+| **Operator Knowledge UI** | Implemented | Client-first navigation, scope browser, document upload/delete, search |
+| **Governance & auth** | Implemented | Operator session auth for write, bot bearer for read, dual-path access control |
+| **Evaluation framework** | Implemented | 8 criteria (3 hard at 100%), 6 scenario types, answer contract (ADR-014) |
+| **Live pilot evaluation** | Pending | #307 OPEN — requires live bot + client documents for final quality gate |
 
-**Status**: Architecture debate phase — 7 decision sessions in progress before implementation begins.
+**Status**: Implemented. Automated verification complete (295+ tests). Architecture locked (ADRs 008-014). Live pilot evaluation pending — #307 open.
 
 Tracking doc: [SA Knowledge Base Milestone](milestones/production-sa-knowledge-base)
 

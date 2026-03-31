@@ -57,6 +57,19 @@ Per-bot credential management for external tool integrations through the Model C
 - **Runtime re-application**: Credential changes take effect automatically without manual restarts
 - **Audit-friendly**: Credential presence and creation timestamps are queryable without revealing secret values
 
+## Domain Knowledge (SA Knowledge Base)
+
+Client-scoped knowledge bases that enable SA bots to answer from domain documents with provenance and citation.
+
+- **Client-scoped isolation**: Knowledge is organized as `{client_id}/{scope_name}`. Each bot subscribes to specific scopes at creation time. Cross-client access is prevented by server-side scope resolution.
+- **File-upload ingestion**: Operators upload PDF, HTML, markdown, text, or code files. Documents are chunked, embedded (Qdrant), and tracked with SHA-256 hashes and ingested_at timestamps.
+- **Document lifecycle**: Same-content re-uploads are no-ops. Modified content triggers atomic two-phase replace. Deleted documents are tombstoned.
+- **Runtime retrieval**: A gateway plugin auto-retrieves relevant chunks before LLM inference and injects them as cited context. The bot's answer contract forbids fabricated citations and requires unavailability disclosure.
+- **Operator UI**: Client-first Knowledge Base page — browse clients, view scopes, upload documents, search, delete. Configured bot scopes appear immediately, even before first document upload.
+- **Dual-path auth**: Write operations (upload, delete) require operator session. Read/search supports operator session or bot bearer token.
+
+**Current status**: Implemented. Automated verification complete. Live pilot evaluation pending.
+
 ## Deployment Model
 
 The API server operates as a GitOps-native service:

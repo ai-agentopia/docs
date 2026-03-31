@@ -176,6 +176,33 @@ Role contracts are enforced at the governance layer — they define what tools e
 
 ---
 
+## SA Knowledge Base
+
+SA bots can access client-provided domain knowledge at inference time. This enables grounded, cited answers from architecture specs, API references, project standards, and other client documents.
+
+### How it works
+
+1. **Operator ingests documents** — uploads PDF, markdown, HTML, text, or code files into client-scoped knowledge bases via the operator UI or API
+2. **Gateway plugin retrieves** — at inference time, a `knowledge-retrieval` gateway plugin (priority 10, before mem0) queries bot-config-api for relevant chunks matching the user's question
+3. **Context injection** — retrieved chunks are injected into the LLM context as XML domain-knowledge blocks with [N] citation references
+4. **Answer contract** — the D7 answer contract instructs the LLM to cite sources, never fabricate citations, and disclose when no domain documentation is available
+
+### Scope isolation
+
+Knowledge is scoped per client: `{client_id}/{scope_name}`. Each bot subscribes to specific scopes at creation time. The gateway plugin sends only the bot's identity — bot-config-api resolves subscribed scopes server-side. Cross-client knowledge leakage is prevented by design.
+
+### Document lifecycle
+
+Documents are tracked by SHA-256 hash. Re-uploading unchanged content is a no-op. Modified content triggers a two-phase replace: new chunks are committed atomically before old chunks are superseded. Deleted documents are tombstoned, not silently removed.
+
+### Architecture decisions
+
+Seven ADRs (008-014) lock the architecture: tenancy/isolation, governance, runtime retrieval, provenance, ingestion lifecycle, external import (deferred), and quality/evaluation. See [SA Knowledge Base Milestone](/milestones/production-sa-knowledge-base) for details.
+
+**Current status**: Implemented. Automated verification complete. Live pilot evaluation pending (#307).
+
+---
+
 ## Technology Stack
 
 | Layer | Technology | Purpose |
@@ -187,6 +214,7 @@ Role contracts are enforced at the governance layer — they define what tools e
 | **Agent Runtime** | OpenClaw-based gateway | LLM orchestration, tool execution, memory |
 | **Agent Communication** | A2A Protocol (JSON-RPC) | Agent-to-agent task dispatch and consultation |
 | **Semantic Memory** | Qdrant + Neo4j | Vector search + knowledge graph per agent |
+| **Domain Knowledge** | Qdrant + Postgres | Client-scoped document ingestion, retrieval, provenance tracking |
 | **LLM Proxy** | Custom Rust proxy | Multi-provider routing, token tracking, rate limiting |
 | **Persistence** | PostgreSQL | Workflows, packets, bindings, evidence, audit trail |
 | **Deployment** | Kubernetes, ArgoCD, Helm | GitOps-managed infrastructure |
@@ -221,3 +249,4 @@ Each agent runs in its own pod with isolated storage, memory, and credentials. A
 - [Execution Authorization](p1-execution-authorization) — dual-lane enforcement architecture
 - [Governed PR Review](governed-pr-review-workflow) — automated code review workflow
 - [Worker Pool Routing](worker-pool-routing-improvement-plan) — capability-aware dispatch evolution
+- [SA Knowledge Base](/milestones/production-sa-knowledge-base) — domain knowledge ingestion, retrieval, and citation
