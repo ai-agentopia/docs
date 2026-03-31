@@ -9,7 +9,7 @@ description: "Formal debate on production-ready Super RAG for Agentopia. Grounde
 > **Participants**: CTO, Platform/DevOps
 > **Status**: READY_FOR_CTO_REVIEW
 > **Assumption**: English-first production. Vietnamese/multilingual is optional enhancement.
-> **Revision**: v2 — fixes evaluation logic, demotes Contextual Retrieval, honest current-state labels, separates evidence types, adds service architecture assessment
+> **Revision**: v4 — fixes operator auth contract (in-memory session not portable), adds non-restart binding reconcile, proxy-first migration model
 
 ---
 
@@ -260,10 +260,10 @@ XML injection into LLM context             ← existing
 | Task | Description |
 |---|---|
 | **S2b.1** Create knowledge-api service | New FastAPI service, Dockerfile, Helm chart, ArgoCD app |
-| **S2b.2** Implement binding sync endpoint | `POST /internal/bindings/sync` — bot-config-api notifies on deploy/PATCH |
-| **S2b.3** Implement auth layer | Operator session + bot bearer token verification (see Section J3) |
-| **S2b.4** Deploy alongside bot-config-api | bot-config-api proxies `/api/v1/knowledge/*` to knowledge-api |
-| **S2b.5** Switch gateway plugin target | Update Helm `apiUrl` to knowledge-api directly |
+| **S2b.2** Implement binding sync + reconcile | `POST /internal/bindings/sync` webhook, cache-miss CRD fallback, periodic 5min reconcile |
+| **S2b.3** Implement auth layer | Bot bearer (direct K8s Secret read) + internal service token for proxied operator requests. NO independent session middleware. (see Section J3) |
+| **S2b.4** Deploy alongside bot-config-api (proxy model) | bot-config-api terminates operator auth, proxies `/api/v1/knowledge/*` to knowledge-api with `X-Internal-Service` + `INTERNAL_SERVICE_TOKEN` |
+| **S2b.5** Switch gateway plugin target | Update Helm `apiUrl` to knowledge-api directly (bot bearer auth, no session) |
 | **S2b.6** Remove knowledge code from bot-config-api | After stable operation period |
 | **S2b.7** **Topology gate** | Retrieval latency p95 must not increase >200ms vs Phase 2a baseline. Rollback tested. |
 
@@ -489,17 +489,39 @@ Bot deploy/PATCH (bot-config-api)
         body: { bot: "max-sa", client_id: "c1", scopes: ["docs", "api"] }
         ← knowledge-api updates its in-memory index
         ← if knowledge-api unavailable: deploy succeeds with warning
-                                        knowledge-api self-heals on restart via rebuild_from_k8s()
+                                        reconcile handles eventual consistency (see below)
 ```
+
+**Non-restart reconcile strategies** (all three implemented):
+
+1. **Cache-miss CRD fallback** — when `resolve(bot_name)` returns empty (cache miss), knowledge-api performs a live CRD annotation lookup before returning "no scopes". This closes the window for newly deployed bots whose sync webhook was missed. Cost: one K8s API call per cache miss (rare on hot path).
+
+2. **Periodic background reconciliation** — background task runs `rebuild_from_k8s()` every 5 minutes (configurable via `BINDING_RECONCILE_INTERVAL_SECONDS`). Catches any drift from missed webhooks, manual CRD edits, or partial failures. Bounded staleness: max 5 minutes.
+
+3. **Startup full rebuild** — existing `rebuild_from_k8s()` on service start (unchanged). Handles pod restart/reschedule.
+
+**Stale binding window**: With cache-miss fallback, a newly deployed bot's first search triggers a live lookup — **zero stale window for new bindings**. For binding updates (scope change on existing bot), periodic reconcile bounds staleness to the reconcile interval. Acceptable for scope changes which are operator-initiated and infrequent.
 
 **Auth after extraction**:
 
+> **Critical constraint**: Operator sessions use in-memory `SessionStore` (Python dict, single-replica). A cookie issued by `bot-config-api` is meaningless to `knowledge-api` — there is no shared session backend. "Same ADMIN_PASSWORD" allows independent login but does NOT create shared sessions.
+
+**Migration phase (proxy model — recommended)**:
+
 | Auth path | Termination | How |
 |---|---|---|
-| **Operator session** | knowledge-api owns its own session middleware (same ADMIN_PASSWORD env var) | Independent — no proxy needed |
+| **Operator session** | **bot-config-api terminates auth** (existing session middleware) | UI continues calling bot-config-api; bot-config-api proxies `/api/v1/knowledge/*` to knowledge-api with internal service header |
 | **Bot bearer** | knowledge-api verifies relay token directly | Option A: read K8s Secret (needs RBAC). Option B: bot-config-api passes token hash during binding sync |
-| **Gateway plugin** | Calls knowledge-api directly (Helm `apiUrl` updated) | Clean — URL-agnostic contract |
-| **UI** | Calls knowledge-api directly for scope/doc/search | Clean — same REST contract |
+| **Gateway plugin** | Calls knowledge-api directly (Helm `apiUrl` updated) | Clean — URL-agnostic contract. Bot bearer auth, no session cookie. |
+| **UI** | Calls **bot-config-api** (proxied to knowledge-api) | Operator session stays on bot-config-api; knowledge-api receives pre-authenticated requests via internal header |
+
+**Internal service auth for proxied requests**: bot-config-api adds `X-Internal-Service: bot-config-api` + shared `INTERNAL_SERVICE_TOKEN` header. knowledge-api trusts requests with valid internal token — no session cookie needed on the knowledge-api side.
+
+**Post-migration option (if services fully decoupled later)**:
+
+Migrate session store from in-memory to shared backend (Redis or Postgres). Both services validate the same session state. This is already planned as P2 in the current `session.py` (`"MVP1: in-memory store. Single replica required. P2: migrate to Redis/Postgres."`). Only pursue this when multi-replica or independent UI access to knowledge-api is required.
+
+**Why proxy-first**: No new infrastructure (Redis), no new auth protocol. Uses existing session middleware in bot-config-api. knowledge-api only needs to verify two auth types: bot bearer (existing) and internal service token (simple shared secret). Rollback = remove proxy, knowledge code still in bot-config-api.
 
 **Rollback path**:
 1. Revert gateway plugin `apiUrl` in Helm to point back to bot-config-api
@@ -509,10 +531,11 @@ Bot deploy/PATCH (bot-config-api)
 
 **Compatibility during migration**:
 - Both services run simultaneously
-- bot-config-api proxies `/api/v1/knowledge/*` to knowledge-api (reverse proxy)
-- Clients (gateway, UI) continue calling bot-config-api URL
-- Once stable, update Helm `apiUrl` to knowledge-api directly
-- Remove proxy + knowledge code from bot-config-api
+- bot-config-api terminates operator session auth, then proxies `/api/v1/knowledge/*` to knowledge-api with internal service token
+- **UI** continues calling bot-config-api URL — operator sessions work unchanged
+- **Gateway plugin** can switch to knowledge-api directly via Helm `apiUrl` (uses bot bearer, not session)
+- Once stable: UI migration requires either shared session store (P2) or UI repointing to knowledge-api with its own login
+- Remove proxy + knowledge code from bot-config-api only after all clients migrated
 
 ### J4. Why Not Extract Now (Phase 0-1)
 
@@ -547,10 +570,12 @@ TRACK B: Service Architecture (independent track)
 
 **Phase 2b gate**: Extraction is complete when:
 1. Knowledge-api runs independently with own health check
-2. Gateway plugin calls knowledge-api directly (Helm apiUrl updated)
-3. All existing knowledge tests pass against knowledge-api
-4. Retrieval latency p95 does not increase >200ms vs Phase 2a baseline
-5. Rollback to bot-config-api proxy is tested and documented
+2. Gateway plugin calls knowledge-api directly (Helm apiUrl updated, bot bearer auth)
+3. UI access works via bot-config-api proxy (operator session terminated at proxy, internal token forwarded)
+4. Binding sync webhook works + cache-miss fallback verified + periodic reconcile running
+5. All existing knowledge tests pass against knowledge-api
+6. Retrieval latency p95 does not increase >200ms vs Phase 2a baseline
+7. Rollback to bot-config-api proxy is tested and documented
 
 ---
 
