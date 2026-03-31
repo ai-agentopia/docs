@@ -108,9 +108,15 @@ Stream workflow progress and LLM output to operators in real-time. Workflow phas
 
 Complex graph patterns with parallel sub-agents, LLM-driven routing, multi-packet parallel delivery, and multi-agent collaborative conversation during review.
 
-### Intelligence Layer (MCP + RAG)
+### Super RAG — Production-Grade Retrieval
 
-Extend agent capabilities through MCP tool servers and retrieval-augmented generation for codebase-aware responses.
+Upgrade RAG from basic vector search (37% blueprint coverage) to production-grade retrieval with hybrid search, reranking, evaluation, and observability. Six-phase plan: Evaluation Foundation → Retrieval Quality → Semantic Ingestion → Graph RAG → Observability → Guardrails & Continuous Learning.
+
+Design doc: [Super RAG Blueprint](architecture/super-rag-blueprint)
+
+### Intelligence Layer (MCP + Tools)
+
+Extend agent capabilities through MCP tool servers and tool-based integrations for codebase-aware responses.
 
 ### Observability & Cost Management
 
