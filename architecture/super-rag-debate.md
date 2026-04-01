@@ -144,7 +144,7 @@ Query
   ↓
 Qdrant vector search (cosine, top-20)     ← existing, increase limit
   +
-Qdrant BM25 search (sparse, top-20)       ← NEW: enable native BM25
+Qdrant sparse search (TF, top-20)         ← NEW: sparse term-frequency vectors
   ↓
 Reciprocal Rank Fusion (RRF)              ← NEW: merge + deduplicate
   ↓
@@ -244,10 +244,10 @@ XML injection into LLM context             ← existing
 
 | Task | Description |
 |---|---|
-| **R2a.1** Enable Qdrant native BM25 | Sparse vector config + text tokenization per collection |
-| **R2a.2** Implement hybrid search | Vector + BM25 parallel query via Qdrant prefetch API |
+| **R2a.1** Enable Qdrant sparse vectors | Sparse TF vector config + text tokenization per collection (NOTE: TF-only, not full BM25 — no IDF component. Upgrade path documented.) |
+| **R2a.2** Implement hybrid search | Dense + sparse TF parallel query via Qdrant prefetch API + RRF fusion |
 | **R2a.3** Implement RRF fusion | `score = 1/(k + rank_vector) + 1/(k + rank_text)` |
-| **R2a.4** Collection migration | Re-create collections with BM25 support (migration script) |
+| **R2a.4** Collection migration | Re-create collections with sparse vector support (migration script) |
 | **R2a.5** Observability metrics | Prometheus counters/histograms for retrieval stack |
 | **R2a.6** **Labeled eval gate** | Require nDCG@5 ≥ 10% improvement over Phase 1b baseline. **Must use labeled metrics, not RAGAS.** |
 
@@ -479,7 +479,7 @@ Response: `{ results: SearchResult[], count: number }`
 
 **Knowledge-api owns**:
 - Ingestion: chunking, embedding, Qdrant write, document lifecycle
-- Search: vector search, hybrid/BM25, RRF fusion, token budget
+- Search: vector search, hybrid (dense + sparse TF + RRF fusion), token budget
 - Scope resolution: maintains its own in-memory index, synced from bot-config-api
 - Auth: verifies bot bearer tokens (own verification, not delegating to bot-config-api)
 - Observability: retrieval-specific Prometheus metrics
@@ -564,7 +564,7 @@ TRACK A: Retrieval Quality (sequential phases)
   Phase 0  → Foundation hardening (code-only, 1-2 PRs)
   Phase 1a → RAGAS early signal (immediate)
   Phase 1b → Labeled eval baseline (after #307)
-  Phase 2a → Hybrid search within current boundary (Qdrant native BM25 + RRF)
+  Phase 2a → Hybrid search within current boundary (dense + sparse TF + RRF)
            → MUST pass labeled nDCG@5 ≥ 10% improvement gate
   Phase 3+ → Conditional experiments (evidence-driven)
 
@@ -626,7 +626,7 @@ The client requirement has three distinct dimensions. They have **different impl
 
 2. **You cannot build reliable code ingestion inside the current monolithic knowledge service.** Code ingestion is a background pipeline (clone → diff → chunk → embed → store). This is exactly the kind of workload that justifies knowledge-api extraction (Phase 2b). Building it inside bot-config-api creates more technical debt to extract later.
 
-3. **Hybrid search is essential for code.** Developers search code by exact identifiers (function names, error codes, config keys). Pure vector search fails here. Phase 2a (BM25 hybrid) directly enables better code retrieval.
+3. **Hybrid search is essential for code.** Developers search code by exact identifiers (function names, error codes, config keys). Pure vector search fails here. Phase 2a (sparse TF + RRF hybrid) directly enables better code retrieval.
 
 4. **The planner consuming knowledge is a planner feature, not a RAG feature.** The planner today is a minimal stub (`planner_graph.py` returns hardcoded templates). Making it knowledge-aware requires planner evolution regardless of RAG quality.
 
@@ -783,7 +783,7 @@ WorkPacket with grounded:
 | Phase 0: Foundation Hardening | Valid | Prerequisites for everything — config, retry, health. Must complete first. |
 | Phase 1a: RAGAS Early Signal | Valid | Evaluation infrastructure needed before measuring code retrieval quality. |
 | Phase 1b: Labeled Baseline | Valid | Authoritative quality gate. Extend golden dataset to include code queries in Phase 3a. |
-| Phase 2a: Hybrid Retrieval | Valid | **More important now** — code search relies heavily on keyword matching (function names, imports). BM25 is essential. |
+| Phase 2a: Hybrid Retrieval | Valid | **More important now** — code search relies heavily on keyword matching (function names, imports). Sparse keyword retrieval is essential. |
 | Phase 2b: Knowledge-API Extraction | Valid | Code ingestion pipeline should live in knowledge-api, not bot-config-api. Extract first, then build pipeline. |
 
 #### What must be added (new committed work)
@@ -850,7 +850,7 @@ TRACK A: Retrieval Quality (sequential — UNCHANGED)
   Phase 0  → Foundation hardening + source_type metadata column (small addition)
   Phase 1a → RAGAS early signal
   Phase 1b → Labeled eval baseline
-  Phase 2a → Hybrid retrieval (BM25 + RRF) — ESSENTIAL for code search
+  Phase 2a → Hybrid retrieval (sparse TF + RRF) — ESSENTIAL for code search
   Phase 3+ → Conditional experiments
 
 TRACK B: Service Architecture (UNCHANGED)
@@ -866,7 +866,7 @@ TRACK C: Always-Updated Planning Knowledge (NEW — after Track A Phase 2a + Tra
 ```
 
 **Why Track C comes after A + B**:
-1. Hybrid search is essential for code (function names, imports, identifiers need BM25)
+1. Hybrid search is essential for code (function names, imports, identifiers need keyword retrieval)
 2. Code ingestion pipeline should be built in knowledge-api, not in bot-config-api
 3. Evaluation infrastructure must exist to measure code retrieval quality
 4. The planner consuming knowledge only works if the knowledge is good

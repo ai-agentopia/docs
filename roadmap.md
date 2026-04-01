@@ -92,7 +92,7 @@ Upgrade retrieval from basic vector search to production-grade: hybrid search, e
 | **0** | Foundation hardening — plugin config, retry/circuit breaker, health checks |
 | **1a** | RAGAS evaluation early signal (reference-free, directional) |
 | **1b** | Labeled evaluation baseline (nDCG@5, MRR, golden dataset from pilot) |
-| **2a** | Hybrid retrieval — Qdrant native BM25 + RRF fusion |
+| **2a** | Hybrid retrieval — dense + sparse TF + RRF fusion via Qdrant |
 | **2b** | Knowledge-API service extraction (monorepo, proxy-first auth) |
 
 **Planning complete. [Milestone #34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34), 10 issues.** Tracking: [Super RAG Milestone](milestones/production-super-rag) | [Architecture Debate](architecture/super-rag-debate)
