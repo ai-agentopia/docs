@@ -9,7 +9,7 @@ description: "Formal debate on production-ready Super RAG for Agentopia. Grounde
 > **Participants**: CTO, Platform/DevOps
 > **Status**: READY_FOR_CTO_REVIEW
 > **Assumption**: English-first production. Vietnamese/multilingual is optional enhancement.
-> **Revision**: v5 — fixes future-as-implemented wording, resolves bot bearer verification decision
+> **Revision**: v6 — adds Section L (always-updated planning knowledge debate) addressing code/feature/freshness requirements
 
 ---
 
@@ -589,6 +589,290 @@ TRACK B: Service Architecture (independent track)
 
 ---
 
-> All claims are linked inline to sources. Evidence is separated into repo-proven (Sections A-E, J) and external directional (Section H).
+## L. Always-Updated Planning Knowledge — Re-Debate
+
+> **Trigger**: Client requirement refinement. SA bots must use always-updated knowledge for planning, solution design, and workflow generation. Knowledge sources include business documents, code repositories, and feature artifacts — not only uploaded files.
+
+### L1. Current State (repo-verified)
+
+| Component | Reality | Evidence |
+|---|---|---|
+| **Planner knowledge input** | **ZERO** — planner receives only `objective_text`, `workflow_id`, `owner`, `repo`. No knowledge search, no codebase context, no document context. | `planner_graph.py`: `ObjectivePlanInput` has no knowledge fields. `plan_delivery` activity reads objective text only. |
+| **Knowledge ingestion** | **Manual file upload only** — `POST /{scope}/ingest` with multipart file. Webhook endpoint retired (410 Gone). No git sync, no API ingest. | `routers/knowledge.py`: single ingest endpoint. Webhook returns 410. |
+| **Source type awareness** | **None** — all chunks treated identically (text + embedding + metadata). No distinction between business doc, code file, feature spec. | `knowledge.py`: `DocumentFormat` enum has CODE but chunking strategy is not selected by source type. |
+| **Freshness tracking** | **Static** — `ingested_at` timestamp only. No commit SHA, no branch reference, no staleness detection. | `document_records` table: `ingested_at`, `document_hash`, `status`. No git metadata. |
+| **Code awareness at chat time** | **MCP tools only** — bots can read files via GitHub MCP during conversation. Not persisted to knowledge. | `gateway/mcp-servers/github/`: standard MCP server, not connected to knowledge service. |
+| **Dead code hint** | `RepoIndexConfig` model exists in `models/knowledge.py` but is never instantiated anywhere. | Dead artifact from planned feature #24. |
+
+**Bottom line**: The planner is knowledge-blind. Knowledge only flows into chat (gateway plugin injection). Planning and workflow generation operate on raw objective text alone.
+
+### L2. Requirement Analysis — What Actually Needs to Change
+
+The client requirement has three distinct dimensions. They have **different implementation complexity, different value, and different prerequisites**:
+
+| Dimension | What | Complexity | Prerequisites |
+|---|---|---|---|
+| **Business doc knowledge for planning** | Planner queries existing knowledge scopes before decomposing objective | Medium | Phase 0 (config fix) + working knowledge scopes |
+| **Code repository knowledge** | Git-based ingestion: clone → index → incremental re-index on push | High | Knowledge service must handle large volumes + freshness tracking |
+| **Feature artifact knowledge** | GitHub issues, PRs, specs → knowledge | Very High | GitHub webhook pipeline, volatile data, state tracking |
+
+### L3. Pushback: Scope Discipline Required
+
+**Concern**: Adding code ingestion, feature sync, and planner integration to Super RAG triples the scope of milestone #34. The approved plan (Phase 0→1→2a→2b) addresses **retrieval quality and service architecture** — necessary prerequisites for any of the new capabilities.
+
+**Argument**:
+
+1. **You cannot evaluate code knowledge quality without evaluation infrastructure.** If we ingest a 10K-file repo and the planner uses it, how do we know the retrieved code chunks are relevant? Phase 1a/1b (evaluation) must come first.
+
+2. **You cannot build reliable code ingestion inside the current monolithic knowledge service.** Code ingestion is a background pipeline (clone → diff → chunk → embed → store). This is exactly the kind of workload that justifies knowledge-api extraction (Phase 2b). Building it inside bot-config-api creates more technical debt to extract later.
+
+3. **Hybrid search is essential for code.** Developers search code by exact identifiers (function names, error codes, config keys). Pure vector search fails here. Phase 2a (BM25 hybrid) directly enables better code retrieval.
+
+4. **The planner consuming knowledge is a planner feature, not a RAG feature.** The planner today is a minimal stub (`planner_graph.py` returns hardcoded templates). Making it knowledge-aware requires planner evolution regardless of RAG quality.
+
+**Recommendation**: Phase 0→2b remains the foundation. New requirements become **Phase 3 committed work** (not conditional), sequenced AFTER the foundation is proven. This is not deferral — it is correct ordering.
+
+### L4. Knowledge Source Model — Recommended
+
+#### Source Type 1: Business Documents
+
+| Attribute | Recommendation |
+|---|---|
+| **Source of truth** | Uploaded files (PDF, HTML, Markdown, text, code) — operator-managed |
+| **What to ingest** | Client-provided domain docs, architecture specs, API references, project standards |
+| **What NOT to ingest** | Credentials, PII, internal communications, draft documents without explicit approval |
+| **Scope identity** | `{client_id}/{scope_name}` — existing model, unchanged |
+| **Update model** | Manual upload (existing). Source-based sync (e.g., Confluence/GDrive webhook) is **deferred** — no client has requested it |
+| **Freshness** | `ingested_at` timestamp + `document_hash`. Operator controls when to re-upload. Acceptable for business docs which change infrequently. |
+
+**Verdict**: Current model is sufficient for business docs. No change needed in Phase 0-2b.
+
+#### Source Type 2: Code Repositories
+
+| Attribute | Recommendation |
+|---|---|
+| **Source of truth** | Git repository — specific branch (default: main/default branch) |
+| **What to ingest** | Source code files (.py, .ts, .js, .go, .rs, .java, etc.), README, doc files within repo, configuration files |
+| **What NOT to ingest** | Binary files, node_modules, build artifacts, .git directory, files matching .gitignore, secrets/env files |
+| **Scope identity** | `{client_id}/repo:{owner}/{repo}` — new scope convention, prefixed with `repo:` to distinguish from business doc scopes |
+| **Update model** | Git webhook (push event on tracked branch) → incremental re-index (diff against last indexed commit SHA). Fallback: scheduled full reconcile every N hours. |
+| **Freshness** | Per-document: `commit_sha`, `branch`, `indexed_at`. Per-scope: `last_indexed_sha`, `last_indexed_at`. |
+
+**Verdict**: Committed as Phase 3a. Requires Phase 2a (hybrid search for code identifiers) and Phase 2b (knowledge-api owns the pipeline independently).
+
+#### Source Type 3: Feature Artifacts (Issues, PRs, Specs)
+
+| Attribute | Recommendation |
+|---|---|
+| **Source of truth** | GitHub API — issues, pull requests, project specs |
+| **What to ingest** | Issue title + body + labels, PR title + body + diff summary, milestone descriptions |
+| **What NOT to ingest** | Comment threads (too volatile, too noisy), review comments (handled by governed PR review), CI logs |
+| **Scope identity** | `{client_id}/features:{owner}/{repo}` — prefixed with `features:` |
+| **Update model** | GitHub webhook (issues/PR events) → upsert. Issue closed → mark superseded. |
+| **Freshness** | `github_updated_at`, `issue_state` (open/closed), `pr_state` (open/merged/closed). |
+
+**Verdict**: **Conditional, not committed.** Pushback rationale:
+1. Feature artifacts are the most volatile knowledge source — issues change state constantly, PR descriptions are updated, labels shift
+2. The signal-to-noise ratio is low — most issue content is conversation, not structured knowledge
+3. Code knowledge (Source Type 2) provides more actionable planning context than issue metadata
+4. **Reconsider when**: Phase 3a (code knowledge) is stable AND planner demonstrates it needs project management context beyond what's in SOUL.md and objective text
+
+### L5. Update / Sync Model — Recommended
+
+| Source Type | Primary Sync | Fallback | Staleness Bound |
+|---|---|---|---|
+| **Business docs** | Manual upload (existing) | None needed — operator-controlled | Operator responsibility |
+| **Code repos** | GitHub webhook on push → incremental re-index | Scheduled full reconcile every 6h | Max 6h (scheduled) or near-real-time (webhook) |
+| **Feature artifacts** | GitHub webhook on issue/PR events | Scheduled reconcile every 1h | Max 1h |
+
+**Incremental re-index strategy for code**:
+
+```
+Webhook payload (push event)
+  ├── Extract: commits[].added, commits[].modified, commits[].removed
+  ├── Clone: sparse checkout of changed files only (NOT full clone)
+  ├── Diff: compare file hashes against last indexed state
+  │   ├── New file → ingest (code-aware chunking)
+  │   ├── Modified file → replace (two-phase atomic, existing pattern)
+  │   └── Deleted file → tombstone (existing lifecycle)
+  ├── Update scope metadata: last_indexed_sha = head_sha
+  └── Emit: knowledge_repo_sync_files_total (Prometheus counter)
+```
+
+**Same-hash optimization**: Existing `document_hash` dedup applies — unchanged files are skipped automatically. This is already production-grade in the ingestion pipeline.
+
+### L6. Planning Consumption Model — Recommended
+
+**Current gap**: `invoke_planner()` receives only `objective_text`. Must receive knowledge context.
+
+**Proposed flow**:
+
+```
+start_delivery(objective, owner, repo)
+  ↓
+plan_delivery activity (Temporal)
+  ↓
+[NEW] Resolve planning scopes:
+  ├── Business doc scopes: from bot's knowledge binding (existing)
+  ├── Code scope: auto-resolve "{client_id}/repo:{owner}/{repo}" (if indexed)
+  └── Feature scope: auto-resolve "{client_id}/features:{owner}/{repo}" (if indexed)
+  ↓
+[NEW] Knowledge-grounded context retrieval:
+  ├── Search business docs: "What does client say about {objective topic}?"
+  ├── Search code: "What existing code is related to {objective}?"
+  ├── Search features: "What issues/specs relate to {objective}?" (if available)
+  └── Compose: grounding_context = formatted results with citations
+  ↓
+[MODIFIED] invoke_planner(objective_text, grounding_context, owner, repo)
+  ↓
+LLM decomposes objective using:
+  ├── Objective text (what to build)
+  ├── Business doc context (domain constraints, standards)
+  ├── Code context (existing implementation, architecture)
+  └── Feature context (related issues/specs, if available)
+  ↓
+WorkPacket with grounded:
+  ├── in_scope: informed by actual codebase structure
+  ├── acceptance_criteria: informed by project standards
+  └── metadata.knowledge_sources: citation trail for audit
+```
+
+**Freshness in planning**:
+- Each knowledge result carries `ingested_at` (business docs) or `commit_sha` + `indexed_at` (code)
+- Planner prompt includes: `"Code context is from commit {sha} indexed at {date}. Business docs last updated {date}."`
+- If code scope `last_indexed_at` is >24h stale, planner prompt includes warning: `"⚠ Code knowledge may be outdated — last indexed {N}h ago."`
+- Planning does NOT block on fresh knowledge — uses best available, flags staleness
+
+**Scope auto-resolution**:
+- When `start_delivery` is called with `owner/repo`, the system auto-resolves `{client_id}/repo:{owner}/{repo}` scope
+- If scope doesn't exist (repo not indexed), planning proceeds without code context — graceful degradation, same pattern as gateway plugin timeout
+- No manual scope binding required for code — repo identity IS the scope identity
+
+### L7. Metadata / Provenance Model for Evolving Knowledge
+
+**Extended metadata per document**:
+
+| Field | Source Type | Purpose |
+|---|---|---|
+| `source_type` | All | `business_doc`, `code_file`, `feature_artifact` — NEW, required |
+| `ingested_at` | All | When this version was indexed — existing |
+| `document_hash` | All | Content dedup — existing |
+| `commit_sha` | Code | Git commit that produced this version — NEW |
+| `branch` | Code | Tracked branch — NEW |
+| `file_path` | Code | Full path within repo — NEW (currently `source` field, reuse) |
+| `language` | Code | Programming language — NEW |
+| `github_updated_at` | Feature | Last GitHub API update timestamp — NEW |
+| `issue_state` | Feature | open/closed — NEW |
+| `pr_state` | Feature | open/merged/closed — NEW |
+| `approval_status` | Business doc | draft/approved — NEW, optional |
+| `freshness_class` | All (computed) | `current` / `stale` / `unknown` based on source-specific rules — NEW |
+
+**Freshness rules**:
+- Business doc: always `current` (operator-managed, assumed intentional)
+- Code: `current` if `indexed_at` < 24h AND `commit_sha` matches remote HEAD. `stale` otherwise.
+- Feature: `current` if `github_updated_at` < 1h. `stale` otherwise.
+
+**Schema impact**: Requires `ALTER TABLE document_records ADD COLUMN source_type, commit_sha, branch, ...` migration. Backward-compatible — new columns nullable, existing docs default to `source_type = 'business_doc'`.
+
+### L8. Milestone Impact Assessment
+
+#### What remains valid (unchanged)
+
+| Phase | Status | Why unchanged |
+|---|---|---|
+| Phase 0: Foundation Hardening | Valid | Prerequisites for everything — config, retry, health. Must complete first. |
+| Phase 1a: RAGAS Early Signal | Valid | Evaluation infrastructure needed before measuring code retrieval quality. |
+| Phase 1b: Labeled Baseline | Valid | Authoritative quality gate. Extend golden dataset to include code queries in Phase 3a. |
+| Phase 2a: Hybrid Retrieval | Valid | **More important now** — code search relies heavily on keyword matching (function names, imports). BM25 is essential. |
+| Phase 2b: Knowledge-API Extraction | Valid | Code ingestion pipeline should live in knowledge-api, not bot-config-api. Extract first, then build pipeline. |
+
+#### What must be added (new committed work)
+
+**Phase 3a: Code Repository Knowledge** (NEW — committed, not conditional)
+
+| Task | Description |
+|---|---|
+| **C3a.1** Implement `source_type` metadata | Add `source_type`, `commit_sha`, `branch`, `file_path`, `language` columns. Migration script. |
+| **C3a.2** Implement repo ingestion endpoint | `POST /api/v1/knowledge/{scope}/ingest-repo` — accepts `RepoIndexConfig` (owner, repo, branch, file patterns) |
+| **C3a.3** Implement git clone + code-aware chunking | Sparse clone → file scan → code-aware chunking (already exists but unused) → embed → store |
+| **C3a.4** Implement GitHub webhook handler | Receive push events → incremental re-index (add/modify/remove changed files) |
+| **C3a.5** Implement scheduled reconcile | Full re-index every 6h (configurable). Catches missed webhooks, force pushes, branch changes. |
+| **C3a.6** Implement freshness tracking | `last_indexed_sha` per scope. Freshness class computation. Stale warning in retrieval results. |
+| **C3a.7** Extend labeled eval | Add code-specific queries to golden dataset. Measure code retrieval nDCG@5. |
+| **C3a.8** **Code retrieval gate** | Code-specific nDCG@5 must meet threshold (defined after Phase 1b baseline extended with code queries). |
+
+**Prerequisites**: Phase 2a (hybrid search — essential for code) + Phase 2b (knowledge-api — pipeline ownership).
+
+**Phase 3b: Knowledge-Grounded Planning** (NEW — committed, not conditional)
+
+| Task | Description |
+|---|---|
+| **P3b.1** Extend `ObjectivePlanInput` | Add `grounding_context: list[KnowledgeResult]` field |
+| **P3b.2** Implement pre-planning knowledge retrieval | In `plan_delivery` activity: resolve scopes → search business + code knowledge → compose context |
+| **P3b.3** Scope auto-resolution for repos | `start_delivery(owner, repo)` auto-resolves `{client_id}/repo:{owner}/{repo}` scope |
+| **P3b.4** Freshness-aware prompt construction | Include `ingested_at`, `commit_sha` in planner context. Flag stale knowledge (>24h for code). |
+| **P3b.5** Graceful degradation | If no indexed scopes exist, planning proceeds without knowledge context (existing behavior, no regression). |
+| **P3b.6** WorkPacket citation trail | `metadata.knowledge_sources` lists which documents informed the plan. Audit trail. |
+| **P3b.7** **Planning quality gate** | Qualitative: plans produced with knowledge context rated higher than without by operator review (manual gate, not automated). |
+
+**Prerequisites**: Phase 3a (code knowledge available to query).
+
+#### What remains conditional
+
+**Feature artifact knowledge** — NOT committed. Pushback rationale in Section L4 (Source Type 3). Reconsidered when Phase 3a code knowledge is stable AND planner demonstrates it needs project management context.
+
+### L9. Decision Points
+
+**1. Should code knowledge ingestion be committed?**
+
+**YES.** The client requirement is clear — SA planning must use code context. And hybrid search (Phase 2a) directly enables better code retrieval. But it must come AFTER Phase 2a/2b, not before. → **Phase 3a committed.**
+
+**2. Should feature artifacts be committed?**
+
+**NO — conditional.** Pushback: feature artifacts are the most volatile source, lowest signal-to-noise ratio, and highest integration complexity. Code knowledge provides more actionable planning context. Reconsider after Phase 3a proves the code knowledge pipeline. → **Remains conditional.**
+
+**3. Is manual upload acceptable for business docs?**
+
+**YES, for now.** No client has requested Confluence/GDrive auto-sync. Business docs change infrequently. Operator upload with two-phase atomic replace is production-grade. Source-based sync deferred until explicit demand. → **No change.**
+
+**4. Should freshness metadata be first-class?**
+
+**YES.** `source_type` and freshness fields should be designed in Phase 0 (schema migration) even though code ingestion comes later. This avoids a breaking migration later. → **Add `source_type` column to Phase 0 scope (small, backward-compatible).**
+
+**5. Does milestone #34 need new committed issues?**
+
+**YES.** Two new committed issues: Phase 3a (Code Repository Knowledge) and Phase 3b (Knowledge-Grounded Planning). One existing conditional issue updated: Feature Artifacts remains conditional but trigger condition refined.
+
+### L10. Revised Execution Sequence
+
+```
+TRACK A: Retrieval Quality (sequential — UNCHANGED)
+  Phase 0  → Foundation hardening + source_type metadata column (small addition)
+  Phase 1a → RAGAS early signal
+  Phase 1b → Labeled eval baseline
+  Phase 2a → Hybrid retrieval (BM25 + RRF) — ESSENTIAL for code search
+  Phase 3+ → Conditional experiments
+
+TRACK B: Service Architecture (UNCHANGED)
+  Phase 2b → knowledge-api extraction (after 2a stable)
+
+TRACK C: Always-Updated Planning Knowledge (NEW — after Track A Phase 2a + Track B)
+  Phase 3a → Code repository knowledge (git sync, webhook, incremental re-index, freshness)
+           → Requires: Phase 2a (hybrid search) + Phase 2b (knowledge-api owns pipeline)
+           → Gate: code-specific nDCG@5 meets threshold
+  Phase 3b → Knowledge-grounded planning (planner consumes knowledge, scope auto-resolution)
+           → Requires: Phase 3a (code knowledge available)
+           → Gate: operator-rated plan quality improvement
+```
+
+**Why Track C comes after A + B**:
+1. Hybrid search is essential for code (function names, imports, identifiers need BM25)
+2. Code ingestion pipeline should be built in knowledge-api, not in bot-config-api
+3. Evaluation infrastructure must exist to measure code retrieval quality
+4. The planner consuming knowledge only works if the knowledge is good
+
+---
+
+> All claims are linked inline to sources. Evidence is separated into repo-proven (Sections A-E, J, L1) and external directional (Section H).
 
 *This debate document is READY_FOR_CTO_REVIEW.*
