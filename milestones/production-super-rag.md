@@ -145,7 +145,7 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 |---|---|---|---|
 | #316 | 0 | Foundation Hardening | PR review |
 | #317 | 1a | RAGAS Evaluation Early Signal | PR review |
-| #318 | 1b | Labeled Evaluation Baseline | Open (blocked on #307) |
+| #318 | 1b | Labeled Evaluation Baseline | Wave 1 complete, Wave 2 pending #307 |
 | #319 | 2a | Hybrid Retrieval | Open |
 | #320 | 2b | Knowledge-API Extraction | Open |
 | #321 | 3 | Conditional: Contextual Retrieval | Conditional |
@@ -165,4 +165,5 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 - Tracking doc created
 - Roadmap updated
 - Phase 0 (#316) implementation complete: retry/backoff, circuit breaker, externalized config, Qdrant health, score_threshold, source_type metadata. 20 new tests, 153 existing pass.
-- Phase 1a (#317) implementation complete: RAGAS evaluation harness, 5-sample dataset, 3 reference-free metrics, cost-controlled runner, JSON+MD artifacts. 15 new tests.
+- Phase 1a (#317) implementation complete: RAGAS evaluation harness, 5-sample dataset, 3 reference-free metrics, cost-controlled runner, JSON+MD artifacts. 20 tests.
+- Phase 1b (#318) Wave 1 complete: labeled baseline harness, seed dataset (5 queries, graded relevance), nDCG@5/MRR/Precision@5/Recall@5 metrics, e2e baseline run (nDCG@5=0.8774). Wave 2 pending #307 pilot data. 26 tests.
