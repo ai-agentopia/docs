@@ -5,7 +5,7 @@ title: "[Production] Super RAG — Production-Grade Retrieval"
 # Super RAG — Production-Grade Retrieval
 
 **Milestone**: [#34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34)
-**Status**: Approved — not yet started. Planning and architecture debate complete. Milestone #34 and 10 issues created (#316-#325). Execution has not begun.
+**Status**: In progress. Phase 0 (#316) implementation complete and in PR review.
 **Date**: 2026-04-01
 **Type**: Production program document
 **Primary repos**: `agentopia-protocol` (bot-config-api, knowledge-api), `agentopia-infra` (Helm charts)
@@ -143,7 +143,7 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 
 | # | Phase | Title | Status |
 |---|---|---|---|
-| #316 | 0 | Foundation Hardening | Open |
+| #316 | 0 | Foundation Hardening | PR review |
 | #317 | 1a | RAGAS Evaluation Early Signal | Open |
 | #318 | 1b | Labeled Evaluation Baseline | Open (blocked on #307) |
 | #319 | 2a | Hybrid Retrieval | Open |
@@ -164,3 +164,4 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 - 10 issues created (#316-#325): 5 committed, 3 conditional, 2 deferred
 - Tracking doc created
 - Roadmap updated
+- Phase 0 (#316) implementation complete: retry/backoff, circuit breaker, externalized config, Qdrant health, score_threshold, source_type metadata. 20 new tests, 153 existing pass.
