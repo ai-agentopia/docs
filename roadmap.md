@@ -1,6 +1,6 @@
 ---
 title: "Roadmap"
-description: "Agentopia platform capabilities — shipped and planned"
+description: "Agentopia platform capabilities — shipped, approved, and planned"
 ---
 
 
@@ -57,22 +57,6 @@ What Agentopia can do today, and where it's headed.
 
 ## In Progress
 
-### Super RAG — Production-Grade Retrieval
-
-Upgrade RAG from basic vector search to production-grade retrieval with hybrid search, evaluation, observability, and service extraction. Builds on the SA Knowledge Base foundation.
-
-| Capability | Status | Description |
-|---|---|---|
-| **Phase 0: Foundation Hardening** | Planned | Plugin config fix, retry/circuit breaker, health checks, env var exposure |
-| **Phase 1a: RAGAS Early Signal** | Planned | Reference-free evaluation (Faithfulness, Context Precision), CI regression gate |
-| **Phase 1b: Labeled Baseline** | Blocked | Golden dataset from #307 pilot, nDCG@5/MRR/Precision@5, authoritative eval gate |
-| **Phase 2a: Hybrid Retrieval** | Planned | Qdrant native BM25 + vector + RRF fusion, labeled eval gate (nDCG@5 ≥ 10%) |
-| **Phase 2b: Knowledge-API Extraction** | Planned | Service extraction, proxy-first auth, binding sync/reconcile, topology gate |
-
-**Status**: Planning complete. Milestone #34 created. 10 issues (#316-#325). Execution pending.
-
-Tracking doc: [Super RAG Milestone](milestones/production-super-rag)
-
 ### SA Knowledge Base for Domain & Project Intelligence
 
 SA bots use client-provided domain and project knowledge as a reliable working brain — not just conversation memory, but structured document knowledge with provenance, citation, and governance.
@@ -91,6 +75,26 @@ SA bots use client-provided domain and project knowledge as a reliable working b
 **Status**: Implemented. Automated verification complete (295+ tests). Architecture locked (ADRs 008-014). Live pilot evaluation pending — #307 open.
 
 Tracking doc: [SA Knowledge Base Milestone](milestones/production-sa-knowledge-base)
+
+---
+
+## Approved — Not Yet Started
+
+### Super RAG — Production-Grade Retrieval
+
+Upgrade RAG from basic vector search to production-grade retrieval with hybrid search, evaluation, observability, and service extraction. Builds on the SA Knowledge Base foundation (milestone #33).
+
+| Phase | Description |
+|---|---|
+| **Phase 0** | Foundation hardening — plugin config, retry/circuit breaker, health checks |
+| **Phase 1a** | RAGAS evaluation early signal (reference-free, directional) |
+| **Phase 1b** | Labeled evaluation baseline (nDCG@5, MRR, golden dataset from #307 pilot) |
+| **Phase 2a** | Hybrid retrieval — Qdrant native BM25 + RRF fusion, labeled eval gate |
+| **Phase 2b** | Knowledge-API service extraction — proxy-first auth, binding reconcile |
+
+**Status**: Planning and architecture debate complete. Milestone [#34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34) created. 10 issues (#316-#325). Execution has not started.
+
+Tracking doc: [Super RAG Milestone](milestones/production-super-rag) | Architecture: [Super RAG Debate](architecture/super-rag-debate)
 
 ---
 

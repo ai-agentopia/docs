@@ -5,10 +5,10 @@ title: "[Production] Super RAG — Production-Grade Retrieval"
 # Super RAG — Production-Grade Retrieval
 
 **Milestone**: [#34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34)
-**Status**: Planning complete. Issues created. Execution not started.
+**Status**: Approved — not yet started. Planning and architecture debate complete. Milestone #34 and 10 issues created (#316-#325). Execution has not begun.
 **Date**: 2026-04-01
 **Type**: Production program document
-**Primary repos**: `agentopia-protocol` (bot-config-api, knowledge-api), `openclaw-infra` (Helm charts)
+**Primary repos**: `agentopia-protocol` (bot-config-api, knowledge-api), `agentopia-infra` (Helm charts)
 
 ---
 
