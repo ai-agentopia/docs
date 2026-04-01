@@ -871,6 +871,14 @@ TRACK C: Always-Updated Planning Knowledge (NEW — after Track A Phase 2a + Tra
 3. Evaluation infrastructure must exist to measure code retrieval quality
 4. The planner consuming knowledge only works if the knowledge is good
 
+### L11. Provider Scope Boundary
+
+Track C examples (git webhooks, GitHub API, `owner/repo` semantics) assume **Git-based provider flows** as the initial implementation target. This is a pragmatic starting point — Agentopia's current client repos and delivery workflows are GitHub-based.
+
+This is explicitly **NOT a platform-wide provider abstraction decision**. Full provider abstraction (GitHub / Azure DevOps / GitLab / Bitbucket) is a separate platform workstream outside the scope of Super RAG. Super RAG Track C solves code-aware planning knowledge for the current Git/GitHub provider shape only.
+
+**If provider abstraction is later required**: Track C's ingestion pipeline should be refactored behind a provider interface (e.g., `RepoProvider.clone()`, `RepoProvider.webhook_handler()`). That refactor is scoped to the provider abstraction workstream, not to Super RAG.
+
 ---
 
 > All claims are linked inline to sources. Evidence is separated into repo-proven (Sections A-E, J, L1) and external directional (Section H).
