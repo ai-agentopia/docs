@@ -385,3 +385,9 @@ Debates are complete when:
 5. **D5** — Ingestion + Lifecycle (depends on versioning from D4)
 6. **D6** — External Import (special case of ingestion)
 7. **D7** — Quality + Answer Contract (final gate, needs all above)
+
+---
+
+## 14. Next: Super RAG
+
+This milestone provides the foundation for **[Production] Super RAG — Production-Grade Retrieval** (milestone [#34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34)). Super RAG upgrades retrieval from basic vector search to hybrid search with evaluation, observability, and service extraction. See [Super RAG Milestone](production-super-rag.md).

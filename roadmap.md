@@ -57,6 +57,22 @@ What Agentopia can do today, and where it's headed.
 
 ## In Progress
 
+### Super RAG — Production-Grade Retrieval
+
+Upgrade RAG from basic vector search to production-grade retrieval with hybrid search, evaluation, observability, and service extraction. Builds on the SA Knowledge Base foundation.
+
+| Capability | Status | Description |
+|---|---|---|
+| **Phase 0: Foundation Hardening** | Planned | Plugin config fix, retry/circuit breaker, health checks, env var exposure |
+| **Phase 1a: RAGAS Early Signal** | Planned | Reference-free evaluation (Faithfulness, Context Precision), CI regression gate |
+| **Phase 1b: Labeled Baseline** | Blocked | Golden dataset from #307 pilot, nDCG@5/MRR/Precision@5, authoritative eval gate |
+| **Phase 2a: Hybrid Retrieval** | Planned | Qdrant native BM25 + vector + RRF fusion, labeled eval gate (nDCG@5 ≥ 10%) |
+| **Phase 2b: Knowledge-API Extraction** | Planned | Service extraction, proxy-first auth, binding sync/reconcile, topology gate |
+
+**Status**: Planning complete. Milestone #34 created. 10 issues (#316-#325). Execution pending.
+
+Tracking doc: [Super RAG Milestone](milestones/production-super-rag)
+
 ### SA Knowledge Base for Domain & Project Intelligence
 
 SA bots use client-provided domain and project knowledge as a reliable working brain — not just conversation memory, but structured document knowledge with provenance, citation, and governance.
@@ -107,12 +123,6 @@ Stream workflow progress and LLM output to operators in real-time. Workflow phas
 ### Advanced Multi-Agent Collaboration
 
 Complex graph patterns with parallel sub-agents, LLM-driven routing, multi-packet parallel delivery, and multi-agent collaborative conversation during review.
-
-### Super RAG — Production-Grade Retrieval
-
-Upgrade RAG from basic vector search (37% blueprint coverage) to production-grade retrieval with hybrid search, reranking, evaluation, and observability. Six-phase plan: Evaluation Foundation → Retrieval Quality → Semantic Ingestion → Graph RAG → Observability → Guardrails & Continuous Learning.
-
-Design doc: [Super RAG Blueprint](architecture/super-rag-blueprint)
 
 ### Intelligence Layer (MCP + Tools)
 
