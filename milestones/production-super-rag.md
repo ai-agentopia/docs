@@ -71,7 +71,7 @@ This milestone builds on SA-KB (milestone #33). The following are **already impl
 1. **Measure** retrieval quality with reference-free (RAGAS) and labeled (nDCG@5, MRR) metrics
 2. **Improve** retrieval via hybrid search (Qdrant native BM25 + vector + RRF fusion)
 3. **Observe** retrieval behavior with production Prometheus metrics
-4. **Extract** knowledge service into independent knowledge-api with clean auth and sync contracts
+4. **Extract** knowledge service into independent knowledge-api within the `agentopia-protocol` monorepo (service extraction, not repo split)
 5. **Gate** all improvements with labeled evaluation metrics — no unmeasured claims
 
 ---
@@ -91,12 +91,14 @@ Phase 3+ → Conditional experiments (evidence-driven only)
 ### Track B: Service Architecture (after Track A Phase 2a stabilizes)
 
 ```
-Phase 2b → Knowledge-API extraction
+Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorepo, NOT new repo)
            Proxy-first auth model
            Bot bearer via K8s Secret read
            Binding sync webhook + cache-miss fallback + periodic reconcile
            Topology gate: p95 latency must not increase >200ms
 ```
+
+**Locked constraint**: knowledge-api is a new service directory inside `agentopia-protocol`. Repo extraction deferred — only reconsidered with evidence of independent release cadence, distinct team ownership, or monorepo CI/CD blocking delivery.
 
 **Why separated**: If Phase 2a causes quality regression → retrieval logic. If Phase 2b causes issues → topology. Cannot diagnose if both change simultaneously.
 

@@ -257,9 +257,11 @@ XML injection into LLM context             ← existing
 
 **Prerequisite**: Phase 2a hybrid search is stable and baselined.
 
+**Locked constraint**: knowledge-api is a **new service inside the existing `agentopia-protocol` monorepo** — NOT a new repository. New app directory, Dockerfile, Helm chart, and ArgoCD app within the monorepo. Repo extraction only reconsidered if later evidence shows independent release cadence, distinct team ownership, low shared-code coupling, or monorepo CI/CD pain materially blocking delivery.
+
 | Task | Description |
 |---|---|
-| **S2b.1** Create knowledge-api service | New FastAPI service, Dockerfile, Helm chart, ArgoCD app |
+| **S2b.1** Create knowledge-api service | New app directory in `agentopia-protocol`, FastAPI service, Dockerfile, Helm chart, ArgoCD app |
 | **S2b.2** Implement binding sync + reconcile | `POST /internal/bindings/sync` webhook, cache-miss CRD fallback, periodic 5min reconcile |
 | **S2b.3** Implement auth layer | Bot bearer via K8s Secret read (RBAC scoped to `agentopia-gateway-env-*`) + internal service token for proxied operator requests. NO independent session middleware. (see Section J3) |
 | **S2b.4** Deploy alongside bot-config-api (proxy model) | bot-config-api terminates operator auth, proxies `/api/v1/knowledge/*` to knowledge-api with `X-Internal-Service` + `INTERNAL_SERVICE_TOKEN` |
@@ -395,6 +397,8 @@ Production RAG has converged on three stages: recall → fusion → precision.
 ## J. Service Architecture Assessment — Knowledge-API Extraction
 
 > **Client requirement**: RAG components should be extractable to independent services, not locked into a monolithic bot-config-api.
+>
+> **Locked constraint**: knowledge-api is a new service inside the `agentopia-protocol` monorepo. Service extraction only (independent deploy/scale boundary). Repo extraction deferred — reconsidered only with evidence of independent release cadence, distinct team ownership, or monorepo CI/CD pain.
 
 ### J1. Current State (repo-proven)
 
