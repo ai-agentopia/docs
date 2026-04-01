@@ -109,6 +109,14 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
              Both env vars reference the same knowledge-api-env Secret → tokens always match
              Rollback: knowledgeApi.enabled=false → env vars absent → direct mode, no code change
 
+           Proxy auth model (operator vs bot, locked):
+             operator reads  → proxied via X-Internal-Token when KNOWLEDGE_API_URL set
+             write ops       → proxied via X-Internal-Token (operator-only, always)
+             bot reads       → ALWAYS direct through bot-config-api (scope enforcement preserved)
+             Bot reads are NEVER proxied as internal: X-Internal-Token grants all-scope access,
+             which would bypass subscription filtering. Bot reads stay on direct path until
+             gateway apiUrl is explicitly switched to call knowledge-api directly with bot bearer.
+
            Binding sync: webhook + cache-miss fallback + periodic reconcile + startup rebuild
            Topology gate: p95 latency must not increase >200ms
 ```
@@ -183,4 +191,4 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 - Phase 1a (#317) implementation complete: RAGAS evaluation harness, 5-sample dataset, 3 reference-free metrics, cost-controlled runner, JSON+MD artifacts. 20 tests.
 - Phase 1b (#318) Wave 1 complete: labeled baseline harness, seed dataset (5 queries, graded relevance), nDCG@5/MRR/Precision@5/Recall@5 metrics, e2e baseline run (nDCG@5=0.8774). Wave 2 pending #307 pilot data. 26 tests.
 - Phase 2a (#319) Wave 1 COMPLETE: hybrid retrieval (dense + sparse TF + RRF) implemented and real comparison run on live Qdrant. Dense nDCG@5=1.0, Hybrid nDCG@5=0.9262 on 5-doc seed (dense-optimal for tiny corpus — hybrid advantage expected on larger data). 16 tests. Wave 2 pending (authoritative eval + #307 pilot data).
-- Phase 2b (#320) Wave 1 fixes applied (2026-04-01): (1) bot bearer contract corrected to agentopia-gateway-env-{bot}/AGENTOPIA_RELAY_TOKEN; (2) binding rebuild keyed by labels["agentopia/bot"] with agentopia/env selector; (3) Helm proxy wiring added (KNOWLEDGE_API_URL + KNOWLEDGE_API_INTERNAL_TOKEN into bot-config-api); (4) targeted tests: 51 knowledge-api + 66 bot-config-api (10 proxy-wiring) passing. Wave 1 submitted for re-review. Wave 2 (deployed topology + p95 gate) pending.
+- Phase 2b (#320) Wave 1 fixes applied (2026-04-01): (1) bot bearer contract corrected to agentopia-gateway-env-{bot}/AGENTOPIA_RELAY_TOKEN; (2) binding rebuild keyed by labels["agentopia/bot"] with agentopia/env selector; (3) Helm proxy wiring added (KNOWLEDGE_API_URL + KNOWLEDGE_API_INTERNAL_TOKEN into bot-config-api); (4) proxy auth model fixed: operator reads proxied, bot reads always direct (scope enforcement preserved); (5) targeted tests: 51 knowledge-api + 79 bot-config-api (13 proxy-auth-semantics, 10 proxy-wiring) passing. Wave 1 submitted for re-review. Wave 2 (deployed topology + p95 gate) pending.
