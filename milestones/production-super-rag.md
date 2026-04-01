@@ -93,8 +93,23 @@ Phase 3+ → Conditional experiments (evidence-driven only)
 ```
 Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorepo, NOT new repo)
            Proxy-first auth model
-           Bot bearer via K8s Secret read
-           Binding sync webhook + cache-miss fallback + periodic reconcile
+
+           Bot bearer verification contract (locked):
+             Secret: agentopia-gateway-env-{bot_name}
+             Key:    AGENTOPIA_RELAY_TOKEN
+             NOT agentopia-bot-token-{bot_name} (Telegram token — wrong contract)
+
+           Binding rebuild identity rule (locked):
+             Cache key = labels["agentopia/bot"] (runtime slug)
+             NOT annotations["agentopia/agent-name"] (display name — may differ)
+             List selector: agentopia/managed-by=bot-config-api,agentopia/env={K8S_NAMESPACE}
+
+           Proxy wiring:
+             knowledgeApi.enabled=true → bot-config-api gets KNOWLEDGE_API_URL + KNOWLEDGE_API_INTERNAL_TOKEN
+             Both env vars reference the same knowledge-api-env Secret → tokens always match
+             Rollback: knowledgeApi.enabled=false → env vars absent → direct mode, no code change
+
+           Binding sync: webhook + cache-miss fallback + periodic reconcile + startup rebuild
            Topology gate: p95 latency must not increase >200ms
 ```
 
@@ -147,7 +162,7 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 | #317 | 1a | RAGAS Evaluation Early Signal | PR review |
 | #318 | 1b | Labeled Evaluation Baseline | Wave 1 complete, Wave 2 pending #307 |
 | #319 | 2a | Hybrid Retrieval (Sparse TF + RRF) | Wave 1 complete — real comparison run on live Qdrant. Wave 2 pending #307. |
-| #320 | 2b | Knowledge-API Extraction | Open |
+| #320 | 2b | Knowledge-API Extraction | Open — Wave 1 in review (auth/rebuild/Helm fixes applied 2026-04-01) |
 | #321 | 3 | Conditional: Contextual Retrieval | Conditional |
 | #322 | 3 | Conditional: Reranker | Conditional |
 | #323 | 3 | Conditional: Semantic Chunking | Conditional |
@@ -168,3 +183,4 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 - Phase 1a (#317) implementation complete: RAGAS evaluation harness, 5-sample dataset, 3 reference-free metrics, cost-controlled runner, JSON+MD artifacts. 20 tests.
 - Phase 1b (#318) Wave 1 complete: labeled baseline harness, seed dataset (5 queries, graded relevance), nDCG@5/MRR/Precision@5/Recall@5 metrics, e2e baseline run (nDCG@5=0.8774). Wave 2 pending #307 pilot data. 26 tests.
 - Phase 2a (#319) Wave 1 COMPLETE: hybrid retrieval (dense + sparse TF + RRF) implemented and real comparison run on live Qdrant. Dense nDCG@5=1.0, Hybrid nDCG@5=0.9262 on 5-doc seed (dense-optimal for tiny corpus — hybrid advantage expected on larger data). 16 tests. Wave 2 pending (authoritative eval + #307 pilot data).
+- Phase 2b (#320) Wave 1 fixes applied (2026-04-01): (1) bot bearer contract corrected to agentopia-gateway-env-{bot}/AGENTOPIA_RELAY_TOKEN; (2) binding rebuild keyed by labels["agentopia/bot"] with agentopia/env selector; (3) Helm proxy wiring added (KNOWLEDGE_API_URL + KNOWLEDGE_API_INTERNAL_TOKEN into bot-config-api); (4) targeted tests: 51 knowledge-api + 66 bot-config-api (10 proxy-wiring) passing. Wave 1 submitted for re-review. Wave 2 (deployed topology + p95 gate) pending.
