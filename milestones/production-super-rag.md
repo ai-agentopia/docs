@@ -5,8 +5,8 @@ title: "[Production] Super RAG — Production-Grade Retrieval"
 # Super RAG — Production-Grade Retrieval
 
 **Milestone**: [#34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34)
-**Status**: In progress. #316-#318 CLOSED, #320 CLOSED, #327-#329 CLOSED. #319 OPEN (frozen). knowledge-api is sole retrieval data plane. Dense-only is production baseline.
-**Date**: 2026-04-02
+**Status**: Production baseline complete. 8/9 issues CLOSED (#316-#318, #320, #327-#330). #319 OPEN (frozen optimization track — hybrid BM25 did not meet quality gate). Dense-only is the production retrieval baseline. knowledge-api is sole retrieval data plane.
+**Date**: 2026-04-02 (baseline shipped)
 **Type**: Production program document
 **Primary repos**: `agentopia-protocol` (bot-config-api, knowledge-api), `agentopia-infra` (Helm charts)
 
@@ -17,17 +17,21 @@ title: "[Production] Super RAG — Production-Grade Retrieval"
 ### GitHub Artifacts
 
 - Milestone #34: `[Production] Super RAG — Production-Grade Retrieval`
-- **Committed issues**:
+- **Shipped baseline (8 CLOSED)**:
   - #316: Phase 0 — Foundation Hardening
   - #317: Phase 1a — RAGAS Evaluation Early Signal
   - #318: Phase 1b — Labeled Evaluation Baseline
-  - #319: Phase 2a — Hybrid Retrieval (Dense + BM25 Sparse + RRF)
   - #320: Phase 2b — Knowledge-API Service Extraction
-- **Conditional issues**:
+  - #327: Qdrant Collection Name Sanitization (SHA-256 hash fix)
+  - #328: Phase 2b.1 — Gateway Retrieval Traffic Cutover
+  - #329: Phase 2b.2 — Retire Direct Knowledge Runtime
+  - #330: Phase 2b.3 — Remove Shared Knowledge Runtime
+- **Frozen optimization track (1 OPEN)**:
+  - #319: Phase 2a — Hybrid Retrieval (Dense + BM25 Sparse + RRF) — gate FAIL (-5.9%), not promoted
+- **Future backlog (moved to [milestone #35](https://github.com/ai-agentopia/agentopia-protocol/milestone/35))**:
   - #321: Phase 3 Candidate — Contextual Retrieval
   - #322: Phase 3 Candidate — Reranker
   - #323: Phase 3 Candidate — Semantic Chunking
-- **Deferred issues**:
   - #324: Deferred — Graph RAG
   - #325: Deferred — Agentic RAG / Auto-Ingestion / Feedback Loop
 
@@ -164,21 +168,36 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 
 ## 9. Issue Status
 
+### Shipped Baseline (milestone #34)
+
 | # | Phase | Title | Status |
 |---|---|---|---|
 | #316 | 0 | Foundation Hardening | CLOSED (2026-04-01) |
 | #317 | 1a | RAGAS Evaluation Early Signal | CLOSED (2026-04-01) |
-| #318 | 1b | Labeled Evaluation Baseline | CLOSED (2026-04-02) — Wave 2 baseline: nDCG@5=0.925, MRR=0.96, P@5=0.84, R@5=1.0 on 25 queries |
-| #319 | 2a | Hybrid Retrieval (BM25 + RRF) | OPEN — Wave 2 ran with stable BM25 (SHA-256 term IDs). Hybrid nDCG@5=0.8704 vs dense 0.9250 (-5.9%). Gate FAIL (requires ≥+10%). Dense-only outperforms on this corpus. Blocker: quality gate, not implementation correctness. |
-| #320 | 2b | Knowledge-API Extraction | CLOSED (2026-04-01) — all 6 topology gates passed in agentopia-dev |
-| #328 | 2b.1 | Gateway Traffic Cutover | CLOSED (2026-04-02) — bot-facing search routed to knowledge-api:8002 directly. Retrieval p95 delta: -707ms. Rollback validated. Dense-only. |
-| #329 | 2b.2 | Retire Direct Knowledge Runtime | CLOSED (2026-04-02) — bot-config-api routes marked proxy-only. |
-| #330 | 2b.3 | Remove Shared Knowledge Runtime | CLOSED (2026-04-02) — Full ownership transfer: code, tests, eval harnesses, datasets all moved to knowledge-api. bot-config-api has zero knowledge runtime files. qdrant-client removed. PYTHONPATH removed. Dockerfile decoupled. |
-| #321 | 3 | Conditional: Contextual Retrieval | Conditional |
-| #322 | 3 | Conditional: Reranker | Conditional |
-| #323 | 3 | Conditional: Semantic Chunking | Conditional |
-| #324 | — | Deferred: Graph RAG | Deferred |
-| #325 | — | Deferred: Agentic RAG / Auto-Ingestion / Feedback Loop | Deferred |
+| #318 | 1b | Labeled Evaluation Baseline | CLOSED (2026-04-02) — nDCG@5=0.925, MRR=0.96, P@5=0.84, R@5=1.0 |
+| #320 | 2b | Knowledge-API Extraction | CLOSED (2026-04-01) |
+| #327 | — | Qdrant Collection Name Sanitization | CLOSED (2026-04-02) — SHA-256 hash fix |
+| #328 | 2b.1 | Gateway Traffic Cutover | CLOSED (2026-04-02) — retrieval p95 -707ms |
+| #329 | 2b.2 | Retire Direct Knowledge Runtime | CLOSED (2026-04-02) |
+| #330 | 2b.3 | Remove Shared Knowledge Runtime | CLOSED (2026-04-02) — full code ownership transfer |
+
+### Frozen Optimization Track (milestone #34)
+
+| # | Phase | Title | Status |
+|---|---|---|---|
+| #319 | 2a | Hybrid Retrieval (BM25 + RRF) | **OPEN — FROZEN**. BM25 hybrid nDCG@5=0.8704 vs dense 0.9250 (-5.9%). Gate FAIL (≥+10%). Dense-only is production baseline. Not promoted. |
+
+### Future / Conditional Backlog (moved to [milestone #35](https://github.com/ai-agentopia/agentopia-protocol/milestone/35))
+
+These are NOT part of the current committed delivery baseline.
+
+| # | Phase | Title | Status |
+|---|---|---|---|
+| #321 | 3 | Contextual Retrieval | Conditional — trigger: Phase 2a shows chunk quality limits recall |
+| #322 | 3 | Reranker | Conditional — trigger: hybrid nDCG@5 plateaus below target |
+| #323 | 3 | Semantic Chunking | Conditional — trigger: Phase 1 shows chunk boundaries are the problem |
+| #324 | — | Graph RAG | Deferred — trigger: multi-hop query failures in production |
+| #325 | — | Agentic RAG / Auto-Ingestion | Deferred — trigger: injection consistently misses context |
 
 ---
 
