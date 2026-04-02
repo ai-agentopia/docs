@@ -5,7 +5,7 @@ title: "[Production] Super RAG — Production-Grade Retrieval"
 # Super RAG — Production-Grade Retrieval
 
 **Milestone**: [#34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34)
-**Status**: Production baseline complete. 8/10 issues CLOSED (#316-#318, #320, #327-#330). #319 OPEN (frozen — hybrid BM25 quality gate fail). #331 OPEN (blocked — embedding migration quality regression -9% nDCG@5, rollback not yet validated). Dense-only is the production retrieval baseline. knowledge-api is sole retrieval data plane.
+**Status**: Production baseline complete. 9/10 issues CLOSED (#316-#318, #320, #327-#331). #319 OPEN (frozen — hybrid BM25 quality gate fail). Dense-only with `text-embedding-3-small` (1536d) is the production retrieval baseline. knowledge-api is sole retrieval data plane. Model-variable embedding architecture preserved for future optionality.
 **Date**: 2026-04-02 (baseline shipped)
 **Type**: Production program document
 **Primary repos**: `agentopia-protocol` (bot-config-api, knowledge-api), `agentopia-infra` (Helm charts)
@@ -26,8 +26,8 @@ title: "[Production] Super RAG — Production-Grade Retrieval"
   - #328: Phase 2b.1 — Gateway Retrieval Traffic Cutover
   - #329: Phase 2b.2 — Retire Direct Knowledge Runtime
   - #330: Phase 2b.3 — Remove Shared Knowledge Runtime
-- **Active blocked migration (1 OPEN)**:
-  - #331: Embedding Model Migration — qwen/qwen3-embedding-8b (4096d) quality regression (-9% nDCG@5), rollback not yet validated
+- **Resolved migration (1 CLOSED)**:
+  - #331: Embedding Model Migration — CLOSED. Incumbent validated, qwen3 rejected, model-variable architecture preserved
 - **Frozen optimization track (1 OPEN)**:
   - #319: Phase 2a — Hybrid Retrieval (Dense + BM25 Sparse + RRF) — gate FAIL (-5.9%), not promoted
 - **Future backlog (moved to [milestone #35](https://github.com/ai-agentopia/agentopia-protocol/milestone/35))**:
@@ -183,11 +183,11 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 | #329 | 2b.2 | Retire Direct Knowledge Runtime | CLOSED (2026-04-02) |
 | #330 | 2b.3 | Remove Shared Knowledge Runtime | CLOSED (2026-04-02) — full code ownership transfer |
 
-### Active Blocked Migration (milestone #34)
+### Resolved Migration (milestone #34)
 
 | # | Phase | Title | Status |
 |---|---|---|---|
-| #331 | — | Embedding Model Migration | **OPEN — BLOCKED**. Model-variable architecture wired (qwen/qwen3-embedding-8b, 4096d). Config/code/Helm complete. Quality regression: nDCG@5=0.8415 vs 0.9250 (-9.0%). Rollback validation NOT YET EXECUTED. Cannot close until quality regression resolved and rollback path validated. |
+| #331 | — | Embedding Model Migration | CLOSED (2026-04-02) — CTO decision: KEEP_BASELINE_AND_STOP. Incumbent `text-embedding-3-small` (1536d) validated (nDCG@5=0.9254). qwen3-embedding-8b rejected for current corpus (-9% nDCG, -42% recall). Model-variable architecture preserved. Rollback validated: full reindex + quality rebaseline confirmed. |
 
 ### Frozen Optimization Track (milestone #34)
 
