@@ -5,7 +5,7 @@ title: "[Production] Super RAG — Production-Grade Retrieval"
 # Super RAG — Production-Grade Retrieval
 
 **Milestone**: [#34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34)
-**Status**: In progress. #316 CLOSED, #317 CLOSED, #318 CLOSED (baseline nDCG@5=0.925), #320 CLOSED. #319 OPEN — BM25 hybrid nDCG@5=0.8704 vs dense 0.9250 (-5.9%). Gate FAIL (requires ≥+10%).
+**Status**: In progress. #316 CLOSED, #317 CLOSED, #318 CLOSED, #320 CLOSED, #328 CLOSED (traffic cutover). #319 OPEN — BM25 hybrid gate FAIL (-5.9%), frozen as optimization track. Dense-only is production baseline.
 **Date**: 2026-04-02
 **Type**: Production program document
 **Primary repos**: `agentopia-protocol` (bot-config-api, knowledge-api), `agentopia-infra` (Helm charts)
@@ -171,6 +171,7 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 | #318 | 1b | Labeled Evaluation Baseline | CLOSED (2026-04-02) — Wave 2 baseline: nDCG@5=0.925, MRR=0.96, P@5=0.84, R@5=1.0 on 25 queries |
 | #319 | 2a | Hybrid Retrieval (BM25 + RRF) | OPEN — Wave 2 ran with stable BM25 (SHA-256 term IDs). Hybrid nDCG@5=0.8704 vs dense 0.9250 (-5.9%). Gate FAIL (requires ≥+10%). Dense-only outperforms on this corpus. Blocker: quality gate, not implementation correctness. |
 | #320 | 2b | Knowledge-API Extraction | CLOSED (2026-04-01) — all 6 topology gates passed in agentopia-dev |
+| #328 | 2b.1 | Gateway Traffic Cutover | CLOSED (2026-04-02) — bot-facing search routed to knowledge-api directly. Rollback validated. Dense-only. |
 | #321 | 3 | Conditional: Contextual Retrieval | Conditional |
 | #322 | 3 | Conditional: Reranker | Conditional |
 | #323 | 3 | Conditional: Semantic Chunking | Conditional |
