@@ -172,7 +172,8 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 | #319 | 2a | Hybrid Retrieval (BM25 + RRF) | OPEN — Wave 2 ran with stable BM25 (SHA-256 term IDs). Hybrid nDCG@5=0.8704 vs dense 0.9250 (-5.9%). Gate FAIL (requires ≥+10%). Dense-only outperforms on this corpus. Blocker: quality gate, not implementation correctness. |
 | #320 | 2b | Knowledge-API Extraction | CLOSED (2026-04-01) — all 6 topology gates passed in agentopia-dev |
 | #328 | 2b.1 | Gateway Traffic Cutover | CLOSED (2026-04-02) — bot-facing search routed to knowledge-api:8002 directly. Retrieval p95 delta: -707ms. Rollback validated. Dense-only. |
-| #329 | 2b.2 | Retire Direct Knowledge Runtime | CLOSED (2026-04-02) — bot-config-api is control plane + operator proxy only. knowledge-api is sole retrieval data plane. QdrantBackend/KnowledgeService retained for rollback/dev. |
+| #329 | 2b.2 | Retire Direct Knowledge Runtime | CLOSED (2026-04-02) — bot-config-api routes marked proxy-only. |
+| #330 | 2b.3 | Remove Shared Knowledge Runtime | CLOSED (2026-04-02) — knowledge-api owns all retrieval code. qdrant-client removed from bot-config-api. PYTHONPATH coupling removed. Dockerfile no longer COPYs from bot-config-api. |
 | #321 | 3 | Conditional: Contextual Retrieval | Conditional |
 | #322 | 3 | Conditional: Reranker | Conditional |
 | #323 | 3 | Conditional: Semantic Chunking | Conditional |
