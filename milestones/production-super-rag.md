@@ -5,7 +5,7 @@ title: "[Production] Super RAG — Production-Grade Retrieval"
 # Super RAG — Production-Grade Retrieval
 
 **Milestone**: [#34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34)
-**Status**: In progress. #316 CLOSED, #317 CLOSED, #320 CLOSED. #307 CLOSED (live pilot passed). #318 pending baseline execution. #319 pending sparse index deployment.
+**Status**: In progress. #316 CLOSED, #317 CLOSED, #318 CLOSED (Wave 2 baseline: nDCG@5=0.925), #320 CLOSED. #319 OPEN — Wave 2 comparison pending.
 **Date**: 2026-04-02
 **Type**: Production program document
 **Primary repos**: `agentopia-protocol` (bot-config-api, knowledge-api), `agentopia-infra` (Helm charts)
@@ -168,8 +168,8 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 |---|---|---|---|
 | #316 | 0 | Foundation Hardening | CLOSED (2026-04-01) |
 | #317 | 1a | RAGAS Evaluation Early Signal | CLOSED (2026-04-01) |
-| #318 | 1b | Labeled Evaluation Baseline | Wave 1 complete, Wave 2 pending #307 |
-| #319 | 2a | Hybrid Retrieval (Sparse TF + RRF) | Wave 1 complete — real comparison run on live Qdrant. Wave 2 pending #307. |
+| #318 | 1b | Labeled Evaluation Baseline | CLOSED (2026-04-02) — Wave 2 baseline: nDCG@5=0.925, MRR=0.96, P@5=0.84, R@5=1.0 on 25 queries |
+| #319 | 2a | Hybrid Retrieval (Sparse TF + RRF) | Wave 1 complete. Wave 2 comparison pending — must beat Phase 1b baseline by ≥10% nDCG@5. |
 | #320 | 2b | Knowledge-API Extraction | CLOSED (2026-04-01) — all 6 topology gates passed in agentopia-dev |
 | #321 | 3 | Conditional: Contextual Retrieval | Conditional |
 | #322 | 3 | Conditional: Reranker | Conditional |
