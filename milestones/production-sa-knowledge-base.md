@@ -5,8 +5,8 @@ title: "[Production] SA Knowledge Base for Domain & Project Intelligence"
 # SA Knowledge Base for Domain & Project Intelligence
 
 **Milestone**: [#33](https://github.com/ai-agentopia/agentopia-protocol/milestone/33)
-**Status**: Implementation complete, automated verification complete. #301-#306 closed. #307 OPEN — live pilot evaluation pending first-client deployment. Architecture locked (ADRs 008-014).
-**Date**: 2026-03-30
+**Status**: Complete. #301-#307 all closed. #327 (scope model fix) closed. Live pilot evaluation passed all 6 ADR-014 scenarios and all 3 hard requirements. Architecture locked (ADRs 008-014).
+**Date**: 2026-04-02 (final closure)
 **Type**: Production program document
 
 ---
@@ -284,7 +284,7 @@ Debates complete. Implementation executing in waves: A (#304 + #301) → B (#303
 | Runtime retrieval injection for SA bots | [#302](https://github.com/ai-agentopia/agentopia-protocol/issues/302) | **Code complete** — knowledge-retrieval gateway plugin, priority 10, RELAY_TOKEN auth, server-side scope resolution, D3 XML injection + D7 answer contract, 5s timeout, token budget. Helm conditional enablement. Deploy path wires `knowledgeRetrieval.enabled: true` into Helm values when bot has knowledge config. PATCH path reconciles enable/disable. 19 vitest passing. Hotfix: PR #311 wired deploy + PATCH → Helm values. | D3 + #301 + #304 |
 | Operator workflow + admin surfaces | [#305](https://github.com/ai-agentopia/agentopia-protocol/issues/305) | **Code complete** — KnowledgePage with client-first navigation, merged data model (bot config + ingested scopes). Configured clients/scopes visible before document ingest. "Not indexed" state for empty scopes. Upload into configured scope without recreation. 27 knowledge tests + 174 total. | #301 + #303 + #304 |
 | Evaluation + quality gates | [#306](https://github.com/ai-agentopia/agentopia-protocol/issues/306) | **Code complete** — Full D7 evaluation pack: checklist (8 criteria, 3 hard), scenario matrix (6 types), question template (20+), sample fixtures, setup guide, go/no-go template. 22 validation tests passing. | D7 + #302 + #303 |
-| Rollout / UAT / production verification | [#307](https://github.com/ai-agentopia/agentopia-protocol/issues/307) | **OPEN** — Automated verification complete (295 tests). Live pilot evaluation pending. Criteria 1-3, 5-7 require live bot + client docs. Hard #5/#6 not yet proven at 100%. | All above |
+| Rollout / UAT / production verification | [#307](https://github.com/ai-agentopia/agentopia-protocol/issues/307) | **CLOSED** — All 6 ADR-014 scenarios live-executed. All 3 hard requirements at 100%. NO_KNOWLEDGE_CONTRACT mitigation deployed for disclosure compliance. #327 scope model fix (SHA-256 hashed collection names) deployed. | All above |
 
 ---
 
@@ -385,3 +385,9 @@ Debates are complete when:
 5. **D5** — Ingestion + Lifecycle (depends on versioning from D4)
 6. **D6** — External Import (special case of ingestion)
 7. **D7** — Quality + Answer Contract (final gate, needs all above)
+
+---
+
+## 14. Next: Super RAG
+
+This milestone provides the foundation for **[Production] Super RAG — Production-Grade Retrieval** (milestone [#34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34)). Super RAG upgrades retrieval from basic vector search to hybrid search with evaluation, observability, and service extraction. See [Super RAG Milestone](production-super-rag.md).

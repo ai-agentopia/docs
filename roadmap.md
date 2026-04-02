@@ -1,125 +1,123 @@
 ---
 title: "Roadmap"
-description: "Agentopia platform capabilities — shipped and planned"
+description: "Agentopia platform — what's shipped, what's next, and what's planned"
 ---
 
+# Roadmap
 
 What Agentopia can do today, and where it's headed.
+
+> **Legend**: Shipped = production-ready, verified. In Progress = active development. Approved = planned and scoped, not yet started. Planned = future intent, no active work.
 
 ---
 
 ## Shipped
 
-### Core Platform
+### Multi-Bot Orchestration
 
-| Feature | Description |
-|---|---|
-| **Multi-Bot Orchestration** | Deploy and manage multiple AI agents, each with distinct personality, role, and memory |
-| **Role-Based Agent System** | Three canonical roles — Orchestrator, Worker, Reviewer — with authority contracts governing tool access |
-| **A2A Protocol** | Agent-to-agent communication via JSON-RPC with thread-based multi-turn conversations, debate, and bridge skills |
-| **Semantic Memory** | Per-agent memory powered by Qdrant (vector) + Neo4j (graph) via mem0-api |
-| **Persistent File Memory** | Per-agent workspace with SOUL, USER, and session history on persistent storage |
+Deploy and manage specialized AI agents — each with distinct personality, role (Orchestrator / Worker / Reviewer), and persistent memory. Bots communicate via the A2A (Agent-to-Agent) JSON-RPC protocol with debate, bridge, and thread-based multi-turn patterns.
+
+- Role-based authority contracts governing tool access per agent
+- Agent card publishing at `/.well-known/agent-card.json` with SSRF-protected external discovery
+- Per-agent semantic memory (Qdrant + Neo4j via mem0-api) and file-based workspace (SOUL, USER, session history)
 
 ### AI Delivery Orchestration
 
-| Feature | Description |
-|---|---|
-| **Durable Delivery Workflows** | Temporal-powered workflow orchestration: plan → dispatch → develop → review → merge |
-| **LLM-Powered Planning** | LangGraph planner decomposes objectives into structured work packets with scope and acceptance criteria |
-| **Automated Code Delivery** | Workers autonomously create branches, write code, and submit pull requests |
-| **Automated Code Review** | Reviewer agents inspect PRs, submit structured reviews, and approve or request changes |
-| **Rework Loops** | Reviewer feedback triggers rework — worker receives specific comments, fixes code, resubmits |
-| **Governed PR Review** | Bot-based review with policy enforcement, remediation suggestions, and finding closure tracking |
-| **Trello Planning Projection** | One-way sync from workflow state to Trello boards for visual project tracking |
+Temporal-powered durable workflows: plan → dispatch → develop → review → merge.
+
+- LangGraph planner decomposes objectives into structured work packets
+- Workers autonomously create branches, write code, and submit pull requests
+- Reviewer agents inspect PRs, submit structured reviews, approve or request changes
+- Rework loops: reviewer feedback triggers fix cycle — worker receives comments, patches code, resubmits
+- Trello planning projection: one-way sync from workflow state to Trello boards
+
+### Governed PR Review
+
+Bot-based code review with policy enforcement, remediation suggestions, and finding closure tracking.
+
+- Control-plane intake with deduplication and reviewer binding (workflow / repo-bound modes)
+- `.agentopia/review-policy.yml` loaded per-repo — security, schema, and custom lanes
+- Reviewer bot executes full review via A2A, reports findings through completion callback
+- Fix commands and safe-fix registry for automated remediation suggestions
+- Delta re-review: finding reconciliation, closure audit trail, stale finding detection
+- Execution authorization matrix: 29 governance tools classified, role + context enforcement
 
 ### Web Application
 
-| Feature | Description |
-|---|---|
-| **Unified Web App** | React-based UI with bot sidebar, Communication + Workflow tabs, login/session management |
-| **Communication Lane** | Chat with any bot via WebSocket streaming, conversation persistence, markdown rendering |
-| **Workflow Lane** | Start deliveries, track phase timeline, view artifacts (branches, PRs), monitor progress |
-| **Bot Management** | Create, deploy, stop, start, restart, and delete bots through the UI |
-| **Role-Based UI Gating** | Orchestrator bots show workflow start; worker/reviewer bots show read-only workflow views |
-| **Multi-Provider Model Selection** | Choose from multiple LLM providers (Anthropic, OpenAI, Google, Fireworks) per bot |
+React-based unified web app (P1 milestone, closed 2026-03-30).
+
+- Dual-lane product: Communication (chat with any bot via WebSocket) + Workflow (start deliveries, track phases, view artifacts)
+- Bot management: create, deploy, stop, start, restart, delete through the UI
+- Role-based UI gating: orchestrator bots show workflow controls, worker/reviewer bots show read-only views
+- Multi-provider model selection: Anthropic, OpenAI, OpenRouter, Fireworks, Groq, Together, DeepSeek
 
 ### Infrastructure & Operations
 
-| Feature | Description |
-|---|---|
-| **GitOps Deployment** | ArgoCD-managed infrastructure with automated image promotion per environment |
-| **Per-Environment CI/CD** | Separate image tags per branch (dev/uat) with automatic build and deploy |
-| **Agent Discovery** | Agent card publishing and external agent card fetching with SSRF protection |
-| **Execution Authorization** | Governance-enforced tool access — workers can only write code through authorized workflow dispatch |
-| **Prometheus Observability** | Metrics, SLO alerts, and dashboards for A2A protocol, LLM proxy, and delivery workflows |
+- GitOps via ArgoCD with automated image promotion per environment
+- Per-environment CI/CD: separate image tags per branch (dev/uat), automatic build and deploy
+- Prometheus observability: metrics, SLO alerts, dashboards for A2A protocol, LLM proxy, and delivery workflows
+- Custom Rust LLM proxy with 8+ provider backends, dynamic provider loading from Vault secrets
 
 ---
 
 ## In Progress
 
-### SA Knowledge Base for Domain & Project Intelligence
+### SA Knowledge Base — Domain & Project Intelligence
 
-SA bots use client-provided domain and project knowledge as a reliable working brain — not just conversation memory, but structured document knowledge with provenance, citation, and governance.
+SA bots use client-provided documents as a reliable working brain — structured knowledge with provenance, citation, and governance. Implementation complete, pending live pilot.
 
-| Capability | Status | Description |
-|---|---|---|
-| **Client-scoped knowledge model** | Implemented | `{client_id}/{scope_name}` identity, server-side scope resolution, cross-client isolation |
-| **File-upload ingestion** | Implemented | PDF, HTML, markdown, text, code — with SHA-256 hashing, two-phase replace, tombstone lifecycle |
-| **Runtime retrieval injection** | Implemented | Gateway plugin (priority 10), auto-injects domain context before LLM inference |
-| **Provenance & citation** | Implemented | Bot answers cite [N] source documents with filename, section, ingested_at timestamp |
-| **Operator Knowledge UI** | Implemented | Client-first navigation, scope browser, document upload/delete, search |
-| **Governance & auth** | Implemented | Operator session auth for write, bot bearer for read, dual-path access control |
-| **Evaluation framework** | Implemented | 8 criteria (3 hard at 100%), 6 scenario types, answer contract (ADR-014) |
-| **Live pilot evaluation** | Pending | #307 OPEN — requires live bot + client documents for final quality gate |
+| Capability | Status |
+|---|---|
+| Client-scoped knowledge model (`{client_id}/{scope_name}`) | Implemented |
+| File-upload ingestion (PDF, HTML, markdown, text, code) | Implemented |
+| Runtime retrieval injection (gateway plugin, priority 10) | Implemented |
+| Provenance & citation (source, section, page, score) | Implemented |
+| Operator Knowledge UI (client-first, scope browser) | Implemented |
+| Governance & dual-path auth (operator session + bot bearer) | Implemented |
+| Evaluation framework (ADR-014: 8 criteria, 6 scenarios) | Implemented |
+| Live pilot evaluation (#307) | Pending — first client |
 
-**Status**: Implemented. Automated verification complete (295+ tests). Architecture locked (ADRs 008-014). Live pilot evaluation pending — #307 open.
-
-Tracking doc: [SA Knowledge Base Milestone](milestones/production-sa-knowledge-base)
+**295+ tests. Architecture locked (ADRs 008-014).** Tracking: [SA-KB Milestone](milestones/production-sa-knowledge-base)
 
 ---
 
-## Recently Completed
+## Approved — Not Yet Started
 
-### P1 — Web-App Primary Dual-Lane MVP (Closed 2026-03-30)
+### Super RAG — Production-Grade Retrieval
 
-Web app is the primary operator path. Dual-lane product: Communication (chat) + Workflow (delivery). Three execution boundaries enforced. Workflow conversation with live bot reply.
+Upgrade retrieval from basic vector search to production-grade: hybrid search, evaluation, observability, and knowledge service extraction. Builds on SA-KB foundation.
 
-Tracking doc: [P1 Milestone Trace](milestones/p1-web-app-primary-dual-lane-mvp)
+| Phase | What |
+|---|---|
+| **0** | Foundation hardening — plugin config, retry/circuit breaker, health checks |
+| **1a** | RAGAS evaluation early signal (reference-free, directional) |
+| **1b** | Labeled evaluation baseline (nDCG@5, MRR, golden dataset from pilot) |
+| **2a** | Hybrid retrieval — dense + sparse TF + RRF fusion via Qdrant |
+| **2b** | Knowledge-API service extraction (monorepo, proxy-first auth) |
+
+**Planning complete. [Milestone #34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34), 10 issues.** Tracking: [Super RAG Milestone](milestones/production-super-rag) | [Architecture Debate](architecture/super-rag-debate)
 
 ---
 
 ## Planned
 
-### Worker Pool Routing
+Items below have GitHub milestones and/or design docs but no active execution.
 
-Evolve from generic worker dispatch toward capability-aware pool routing — frontend tasks to frontend workers, backend tasks to backend workers, with sticky rework continuity.
+| Area | Description | Reference |
+|---|---|---|
+| **Worker Pool Routing** | Capability-aware dispatch — frontend tasks to frontend workers, backend to backend, sticky rework | [Design doc](architecture/worker-pool-routing-improvement-plan) |
+| **Multi-Step Planning with Human Approval** | Operator approval checkpoints between planning steps | Wave F milestone |
+| **Streaming & Real-Time Notifications** | Stream workflow progress and LLM output to operators in real-time | Wave F milestone |
+| **Advanced Multi-Agent Collaboration** | Parallel sub-agents, LLM-driven routing, multi-packet delivery, collaborative review | Wave G milestone |
+| **Intelligence Layer (MCP + Tools)** | MCP tool servers and codebase-aware integrations | M3 milestone |
+| **Observability & Cost Management** | End-to-end token tracking, cost attribution per bot/workflow, budget alerts | M5 milestone |
+| **Governance & Compliance** | OAuth2/OIDC, audit logging, RBAC for multi-tenant, compliance reporting | M7 milestone |
+| **Marketplace & SaaS** | Agent template marketplace, multi-tenant isolation, subscription management | M8 milestone |
 
-Design doc: [Worker Pool Routing Improvement Plan](architecture/worker-pool-routing-improvement-plan)
+---
 
-### Multi-Step Planning with Human Approval
+## Recently Completed
 
-Enable operator approval checkpoints between planning steps. Pause for human review before committing to a delivery plan.
-
-### Streaming & Real-Time Notifications
-
-Stream workflow progress and LLM output to operators in real-time. Workflow phase notifications to user channels.
-
-### Advanced Multi-Agent Collaboration
-
-Complex graph patterns with parallel sub-agents, LLM-driven routing, multi-packet parallel delivery, and multi-agent collaborative conversation during review.
-
-### Intelligence Layer (MCP + RAG)
-
-Extend agent capabilities through MCP tool servers and retrieval-augmented generation for codebase-aware responses.
-
-### Observability & Cost Management
-
-End-to-end token tracking across all LLM calls, cost attribution per bot and per workflow, usage dashboards and budget alerts.
-
-### Governance & Compliance
-
-OAuth2/OIDC authentication, audit logging, role-based access control for multi-tenant environments, and compliance reporting.
-
-### Marketplace & SaaS
-
-Agent template marketplace, multi-tenant workspace isolation, subscription management, and self-service onboarding.
+| Milestone | Date | Summary |
+|---|---|---|
+| **P1 — Web-App Primary Dual-Lane MVP** | 2026-03-30 | Web app as primary operator path. Dual-lane: Communication + Workflow. [Tracking](milestones/p1-web-app-primary-dual-lane-mvp) |
