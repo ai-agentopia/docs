@@ -5,7 +5,7 @@ title: "[Production] Super RAG — Production-Grade Retrieval"
 # Super RAG — Production-Grade Retrieval
 
 **Milestone**: [#34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34)
-**Status**: In progress. #316 CLOSED, #317 CLOSED, #318 CLOSED (baseline nDCG@5=0.925), #320 CLOSED. #319 OPEN — BM25 hybrid fails gate (-6.9% vs required +10%).
+**Status**: In progress. #316 CLOSED, #317 CLOSED, #318 CLOSED (baseline nDCG@5=0.925), #320 CLOSED. #319 OPEN — BM25 hybrid nDCG@5=0.8704 vs dense 0.9250 (-5.9%). Gate FAIL (requires ≥+10%).
 **Date**: 2026-04-02
 **Type**: Production program document
 **Primary repos**: `agentopia-protocol` (bot-config-api, knowledge-api), `agentopia-infra` (Helm charts)
@@ -21,7 +21,7 @@ title: "[Production] Super RAG — Production-Grade Retrieval"
   - #316: Phase 0 — Foundation Hardening
   - #317: Phase 1a — RAGAS Evaluation Early Signal
   - #318: Phase 1b — Labeled Evaluation Baseline
-  - #319: Phase 2a — Hybrid Retrieval (Dense + Sparse TF + RRF)
+  - #319: Phase 2a — Hybrid Retrieval (Dense + BM25 Sparse + RRF)
   - #320: Phase 2b — Knowledge-API Service Extraction
 - **Conditional issues**:
   - #321: Phase 3 Candidate — Contextual Retrieval
@@ -69,7 +69,7 @@ This milestone builds on SA-KB (milestone #33). The following are **already impl
 ## 4. Program Objective
 
 1. **Measure** retrieval quality with reference-free (RAGAS) and labeled (nDCG@5, MRR) metrics
-2. **Improve** retrieval via hybrid search (dense + sparse TF + RRF fusion via Qdrant)
+2. **Improve** retrieval via hybrid search (dense + BM25 sparse + RRF fusion via Qdrant)
 3. **Observe** retrieval behavior with production Prometheus metrics
 4. **Extract** knowledge service into independent knowledge-api within the `agentopia-protocol` monorepo (service extraction, not repo split)
 5. **Gate** all improvements with labeled evaluation metrics — no unmeasured claims
@@ -169,7 +169,7 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 | #316 | 0 | Foundation Hardening | CLOSED (2026-04-01) |
 | #317 | 1a | RAGAS Evaluation Early Signal | CLOSED (2026-04-01) |
 | #318 | 1b | Labeled Evaluation Baseline | CLOSED (2026-04-02) — Wave 2 baseline: nDCG@5=0.925, MRR=0.96, P@5=0.84, R@5=1.0 on 25 queries |
-| #319 | 2a | Hybrid Retrieval (BM25 + RRF) | OPEN — Wave 2 ran. BM25 hybrid nDCG@5=0.8612 vs dense 0.9250 (-6.9%). Gate FAIL (requires ≥+10%). Dense-only outperforms on this corpus. |
+| #319 | 2a | Hybrid Retrieval (BM25 + RRF) | OPEN — Wave 2 ran with stable BM25 (SHA-256 term IDs). Hybrid nDCG@5=0.8704 vs dense 0.9250 (-5.9%). Gate FAIL (requires ≥+10%). Dense-only outperforms on this corpus. Blocker: quality gate, not implementation correctness. |
 | #320 | 2b | Knowledge-API Extraction | CLOSED (2026-04-01) — all 6 topology gates passed in agentopia-dev |
 | #321 | 3 | Conditional: Contextual Retrieval | Conditional |
 | #322 | 3 | Conditional: Reranker | Conditional |
@@ -190,6 +190,6 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 - Phase 0 (#316) implementation complete: retry/backoff, circuit breaker, externalized config, Qdrant health, score_threshold, source_type metadata. 20 new tests, 153 existing pass.
 - Phase 1a (#317) implementation complete: RAGAS evaluation harness, 5-sample dataset, 3 reference-free metrics, cost-controlled runner, JSON+MD artifacts. 20 tests.
 - Phase 1b (#318) Wave 1 complete: labeled baseline harness, seed dataset (5 queries, graded relevance), nDCG@5/MRR/Precision@5/Recall@5 metrics, e2e baseline run (nDCG@5=0.8774). Wave 2 pending #307 pilot data. 26 tests.
-- Phase 2a (#319) Wave 1 COMPLETE: hybrid retrieval (dense + sparse TF + RRF) implemented and real comparison run on live Qdrant. Dense nDCG@5=1.0, Hybrid nDCG@5=0.9262 on 5-doc seed (dense-optimal for tiny corpus — hybrid advantage expected on larger data). 16 tests. Wave 2 pending (authoritative eval + #307 pilot data).
+- Phase 2a (#319) Wave 1 COMPLETE: hybrid retrieval (dense + sparse TF + RRF) implemented. Wave 2 ran with BM25 remediation (IDF + length norm + stable SHA-256 term IDs): hybrid nDCG@5=0.8704 vs dense 0.9250 (-5.9%). Gate FAIL (requires ≥+10%). Sparse TF → BM25 progression: -13.2% → -6.9% → -5.9%. 20 tests. Blocker: quality gate, not implementation.
 - Phase 2b (#320) Wave 1 fixes applied (2026-04-01): (1) bot bearer contract corrected to agentopia-gateway-env-{bot}/AGENTOPIA_RELAY_TOKEN; (2) binding rebuild keyed by labels["agentopia/bot"] with agentopia/env selector; (3) Helm proxy wiring added (KNOWLEDGE_API_URL + KNOWLEDGE_API_INTERNAL_TOKEN into bot-config-api); (4) proxy auth model fixed: operator reads proxied, bot reads always direct (scope enforcement preserved); (5) targeted tests: 51 knowledge-api + 79 bot-config-api (13 proxy-auth-semantics, 10 proxy-wiring) passing.
 - Phase 2b (#320) Wave 2 COMPLETE (2026-04-01): (1) knowledge-api deployed to agentopia-dev (image dev-c3c4ab4, 1/1 Running); (2) operator proxy path verified — GET /scopes proxied to knowledge-api (10.42.0.140 in access log); (3) bot direct path verified — bot bearer auth serves direct, knowledge-api receives NO request; (4) binding lifecycle verified — startup rebuild (1 bot), periodic reconcile at 300s interval; (5) rollback tested — knowledgeApi.enabled=false → pod pruned, KNOWLEDGE_API_URL absent, direct mode restored; (6) p95 latency gate PASS — proxy adds +62.7ms p95 (gate ≤200ms; direct p95=36.5ms, proxy p95=99.2ms).
