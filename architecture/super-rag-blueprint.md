@@ -52,7 +52,7 @@ description: "Gap analysis against production RAG blueprint, current state mappi
 | Document parsing | PDF (PyPDF2), HTML (BeautifulSoup), Markdown, plain text, code files | **HAVE** |
 | Chunking | 3 strategies: fixed-size (512/64), paragraph, code-aware. Semantic chunking defined but **NOT implemented**. | **PARTIAL** |
 | Metadata tagging | Rich: source, format, scope, section (markdown heading), chunk_index, total_chunks, ingested_at, document_hash | **HAVE** |
-| Embedding | `qwen/qwen3-embedding-8b` via OpenRouter (1024 dims, multilingual SOTA) | **HAVE** |
+| Embedding | `qwen/qwen3-embedding-8b` via OpenRouter (4096 dims, multilingual SOTA) | **HAVE** |
 | Vector DB | Qdrant v1.16.1, collection-per-scope, cosine similarity, 5Gi PVC | **HAVE** |
 | Versioning support | Two-phase atomic replace, SHA-256 same-hash short-circuit, tombstone lifecycle (active/superseded/deleted) in Postgres | **HAVE** |
 | Incremental updates | **NOT IMPLEMENTED** — full re-embed on document update. Same-hash skip only. | **GAP** |

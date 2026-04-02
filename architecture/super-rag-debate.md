@@ -24,7 +24,7 @@ description: "Formal debate on production-ready Super RAG for Agentopia. Grounde
 | **Postgres document lifecycle** | `document_records` table: active/superseded/deleted states, tombstone ledger | **Implemented** — tested |
 | **Provenance & citations** | Source, section, page, chunk_index, score, ingested_at, document_hash — 35 provenance tests | **Implemented** — tested |
 | **Runtime retrieval plugin** | Gateway extension (priority 10), 5s timeout, non-blocking, XML injection with D7 answer contract | **Production-pending** — Helm config gap silently disables plugin (F0.1) |
-| **Vector search** | Qdrant v1.16.1, `qwen/qwen3-embedding-8b` (1024d), cosine similarity, topK=5 | **Operationally present** — works, but no retry/circuit breaker on embedding API |
+| **Vector search** | Qdrant v1.16.1, `qwen/qwen3-embedding-8b` (4096d), cosine similarity, topK=5 | **Operationally present** — works, but no retry/circuit breaker on embedding API |
 | **Memory system** | mem0-api: Qdrant (semantic) + Neo4j (graph), separate from knowledge | **Operationally present** — running, patched for Neo4j edge cases |
 | **Operator Knowledge UI** | Client-first navigation, scope browser, upload/delete/search | **Implemented** — tested |
 | **Evaluation framework** | ADR-014: 8 criteria (3 hard at 100%), 6 scenario types, 7 evaluation artifacts, 22 contract tests | **Design-complete, automation-pending** — no retrieval quality metrics yet |
@@ -208,7 +208,7 @@ XML injection into LLM context             ← existing
 | **F0.2** Retry + exponential backoff on embedding API | `tenacity.retry`, 3 attempts, 1s→2s→4s | Transient OpenRouter failures crash ingest |
 | **F0.3** Circuit breaker on OpenRouter | 5 failures → fast-fail 5 minutes | Cascading failures during API outage |
 | **F0.4** Expose embedding timeout as env var | Replace hardcoded 30s | Cannot tune without redeploy |
-| **F0.5** Expose vector dimension as env var | Replace hardcoded 1024 | Model change requires code change |
+| **F0.5** Expose vector dimension as env var | Replace hardcoded dimension | Model change requires code change |
 | **F0.6** Qdrant health check endpoint | `/health` returns reachability | Silent search failures |
 | **F0.7** `score_threshold` in Qdrant search | Native param vs post-filter | Slightly more efficient |
 
