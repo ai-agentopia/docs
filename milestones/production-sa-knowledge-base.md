@@ -5,8 +5,8 @@ title: "[Production] SA Knowledge Base for Domain & Project Intelligence"
 # SA Knowledge Base for Domain & Project Intelligence
 
 **Milestone**: [#33](https://github.com/ai-agentopia/agentopia-protocol/milestone/33)
-**Status**: Implementation complete, automated verification complete. #301-#306 closed. #307 OPEN — live pilot evaluation pending first-client deployment. Architecture locked (ADRs 008-014).
-**Date**: 2026-03-30
+**Status**: Complete. #301-#307 all closed. #327 (scope model fix) closed. Live pilot evaluation passed all 6 ADR-014 scenarios and all 3 hard requirements. Architecture locked (ADRs 008-014).
+**Date**: 2026-04-02 (final closure)
 **Type**: Production program document
 
 ---

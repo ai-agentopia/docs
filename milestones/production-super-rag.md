@@ -5,8 +5,8 @@ title: "[Production] Super RAG — Production-Grade Retrieval"
 # Super RAG — Production-Grade Retrieval
 
 **Milestone**: [#34](https://github.com/ai-agentopia/agentopia-protocol/milestone/34)
-**Status**: In progress. Phase 0 (#316) implementation complete and in PR review.
-**Date**: 2026-04-01
+**Status**: In progress. #316 CLOSED, #317 CLOSED, #320 CLOSED. #307 CLOSED (live pilot passed). #318 pending baseline execution. #319 pending sparse index deployment.
+**Date**: 2026-04-02
 **Type**: Production program document
 **Primary repos**: `agentopia-protocol` (bot-config-api, knowledge-api), `agentopia-infra` (Helm charts)
 
@@ -166,11 +166,11 @@ Phase 2b → Knowledge-API extraction (new service in agentopia-protocol monorep
 
 | # | Phase | Title | Status |
 |---|---|---|---|
-| #316 | 0 | Foundation Hardening | PR review |
-| #317 | 1a | RAGAS Evaluation Early Signal | PR review |
+| #316 | 0 | Foundation Hardening | CLOSED (2026-04-01) |
+| #317 | 1a | RAGAS Evaluation Early Signal | CLOSED (2026-04-01) |
 | #318 | 1b | Labeled Evaluation Baseline | Wave 1 complete, Wave 2 pending #307 |
 | #319 | 2a | Hybrid Retrieval (Sparse TF + RRF) | Wave 1 complete — real comparison run on live Qdrant. Wave 2 pending #307. |
-| #320 | 2b | Knowledge-API Extraction | Wave 2 COMPLETE (2026-04-01) — deployed agentopia-dev, all 6 gates passed |
+| #320 | 2b | Knowledge-API Extraction | CLOSED (2026-04-01) — all 6 topology gates passed in agentopia-dev |
 | #321 | 3 | Conditional: Contextual Retrieval | Conditional |
 | #322 | 3 | Conditional: Reranker | Conditional |
 | #323 | 3 | Conditional: Semantic Chunking | Conditional |
