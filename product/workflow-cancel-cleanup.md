@@ -43,7 +43,7 @@ These resources are cleaned up as part of every successful cancel:
 | Temporal delivery workflow | Sent a cancel signal (best-effort — see Temporal Divergence below) |
 | Work packets in active states | Transitioned to `cancelled` (see Packet Policy below) |
 | Objectives in `active` state | Transitioned to `cancelled` |
-| Trello planning card | Archived (fire-and-forget — best-effort) |
+| Trello planning card | Archived (synchronous, best-effort) |
 
 ### Work Packet Policy
 
@@ -79,6 +79,28 @@ Cancel is modeled as a two-tier operation:
 
 When the workflow is `CANCELED` in the database but some cleanup step failed, the API returns `cleanup_status: "partial"` and includes a `warnings` list describing what was not completed.
 
+### Durable Cleanup Result
+
+The structured cancel cleanup result is persisted into the cancel transition event metadata (`w0_run_events.metadata.cancel_cleanup`). This makes the cleanup outcome queryable from the workflow detail endpoint (`GET /api/v1/workflows/{id}`) via the `cancel_cleanup` field.
+
+The UI uses this persisted data to show the partial cleanup warning even after page refresh or reopening the workflow. The mutation result provides immediate post-cancel feedback; the persisted detail provides durable visibility.
+
+**Response shape** (cancel cleanup, both in POST cancel response and GET detail `cancel_cleanup` field):
+
+```json
+{
+  "workflow_status": "CANCELED",
+  "cleanup_status": "completed | partial | skipped | failed",
+  "monitor_stopped": true,
+  "temporal_cancelled": true,
+  "work_packets_cancelled": 3,
+  "work_packets_skipped": 1,
+  "objectives_cancelled": 2,
+  "planning_board_archive_status": "archived | skipped | failed",
+  "warnings": []
+}
+```
+
 ### Temporal Divergence
 
 If the Temporal runtime cancel signal fails (e.g. Temporal is temporarily unavailable):
@@ -101,6 +123,7 @@ This feature does not:
 - Hard-delete `w0_runs`, `workflow_messages`, `delivery_start_requests`, or any audit/evidence rows
 - Provide an admin purge mechanism — that is a separate admin follow-up action
 - Guarantee Temporal cleanup if the Temporal runtime is unavailable
+- Guarantee Trello archive if the planning board service fails (reported honestly as `failed`)
 
 ## Acceptance Criteria
 
@@ -117,4 +140,5 @@ This feature does not:
 - UI cancel button is visible only on non-terminal workflows
 - UI requires confirmation before cancel
 - UI shows CANCELED badge after successful cancel
-- UI shows a partial cleanup warning when `cleanup_status: "partial"`
+- UI shows a partial cleanup warning when `cleanup_status: "partial"` — durable across refresh via persisted workflow detail
+- Cancel cleanup result is persisted in transition event metadata and exposed in workflow detail response
