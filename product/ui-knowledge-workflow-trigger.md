@@ -136,6 +136,35 @@ interface Bot {
 - `agentopia-ui/src/pages/WorkflowPage.tsx` — accept prefilled intent from navigation state
 - `agentopia-ui/src/__tests__/knowledge-workflow.test.tsx` — new test file
 
+## Shipped Behavior (2026-04-03)
+
+### Implementation Summary
+
+Feature implemented in `agentopia-ui` branch `feat/ui-knowledge-workflow-trigger`:
+
+- **KnowledgePage.tsx**: Added "Create Workflow" button on each search result card using the `Play` icon from lucide-react. The button is disabled with tooltip when no workflow-capable bots exist. For single workflow-capable bot: direct navigation. For multiple: lightweight modal picker with bot name/slug.
+- **WorkflowPage.tsx**: Added `useEffect` that reads `location.state.prefilled.objective` from React Router navigation state. Prefilled intent is set as `currentIntent`, which renders the `WorkflowIntentCard` with editable objective and target repo fields. Navigation state is cleared after consumption via `window.history.replaceState`.
+- **Tests**: 6 tests in `knowledge-workflow.test.tsx` covering objective text generation (source/section/scope/snippet inclusion, empty section handling, 300-char truncation) and bot resolution logic (single/zero/multiple workflow-capable bots).
+
+### Actual Limitations
+
+- Prefilled objective encodes knowledge context as text in the `objective` field — no structured metadata field was added to avoid backend API changes.
+- Bot picker is a simple modal overlay, not a dropdown — sufficient for typical 1-3 bot deployments.
+- The `objective` text includes the snippet truncated to 300 chars — longer chunks are cut.
+
+### Final Acceptance Outcome
+
+| Criterion | Result |
+|---|---|
+| CTA appears on search results | PASS — Play icon + "Create Workflow" on every result |
+| Disabled when no workflow-capable bots | PASS — `disabled` attribute + tooltip |
+| Single bot → direct navigation | PASS — navigates to `/bots/:botId/workflow` |
+| Multiple bots → picker | PASS — modal with bot list |
+| Prefilled objective with knowledge context | PASS — source, section, scope, snippet included |
+| Operator can edit before starting | PASS — WorkflowIntentCard objective is editable |
+| No backend API change | PASS — same `POST /delivery/start` payload |
+| Existing workflow path not broken | PASS — knowledge-smoke tests still green |
+
 ## Evaluation Queries
 
 These queries will be used for before/after KB evaluation:
