@@ -85,6 +85,8 @@ The structured cancel cleanup result is persisted into the cancel transition eve
 
 The UI uses this persisted data to show the partial cleanup warning even after page refresh or reopening the workflow. The mutation result provides immediate post-cancel feedback; the persisted detail provides durable visibility.
 
+If metadata persistence itself fails, the cancel result is downgraded to `cleanup_status: "partial"` with a warning stating that durable warning visibility may be unavailable. The workflow is still `CANCELED` — only the cleanup reporting is affected. The API never claims full durability when it cannot deliver it.
+
 **Response shape** (cancel cleanup, both in POST cancel response and GET detail `cancel_cleanup` field):
 
 ```json
