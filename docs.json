@@ -85,7 +85,8 @@
           {
             "group": "Features",
             "pages": [
-              "product/multi-provider-model-selection"
+              "product/multi-provider-model-selection",
+              "product/workflow-cancel-cleanup"
             ]
           }
         ]
