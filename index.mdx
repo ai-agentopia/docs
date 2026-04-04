@@ -1,53 +1,67 @@
 ---
-title: "Introduction"
-description: "Agentopia — Autonomous multi-bot delivery platform"
+title: "Agentopia"
+description: "Autonomous multi-bot platform for governed software delivery"
 ---
 
+Agentopia is an autonomous multi-bot platform that orchestrates AI agents for software delivery. Specialized bots — solution architects, developers, code reviewers, QA analysts — collaborate through the A2A protocol with governed execution boundaries and durable workflow orchestration.
 
+<CardGroup cols={3}>
+  <Card title="Architecture" icon="sitemap" href="/architecture/overview">
+    Platform design, workflow lifecycle, and governance model
+  </Card>
+  <Card title="Product" icon="cube" href="/product/bot-config-api">
+    Bot management, workflow operations, and API reference
+  </Card>
+  <Card title="Roadmap" icon="road" href="/roadmap">
+    What's shipped, in progress, and planned
+  </Card>
+</CardGroup>
 
-Agentopia is an autonomous multi-bot platform that orchestrates AI agents for software delivery. Each bot is a specialized agent — code reviewer, DevOps engineer, QA analyst, solution architect — collaborating through the A2A (Agent-to-Agent) protocol.
+## What's shipped
 
-## What Agentopia does
+<CardGroup cols={2}>
+  <Card title="Multi-Bot Orchestration" icon="users-gear">
+    Role-based authority contracts, A2A coordination, per-agent semantic memory, file-based workspace isolation
+  </Card>
+  <Card title="Workflow Orchestration" icon="diagram-project">
+    Temporal-powered durable workflows: plan, dispatch, develop, review, merge. Rework loops, cancellation with structured cleanup
+  </Card>
+  <Card title="Governed PR Review" icon="shield-check">
+    Policy-driven bot review with risk triage, 29 governance tools, finding closure tracking, incremental re-review
+  </Card>
+  <Card title="Web Application" icon="browser">
+    Dual-lane operator UX: Communication + Workflow. Bot management, workflow monitoring, provider/model selection
+  </Card>
+  <Card title="Provider/Model Control" icon="microchip">
+    Multi-provider catalog (Anthropic, OpenAI, Fireworks, OpenRouter). Per-bot provider/model editable after deploy via UI
+  </Card>
+  <Card title="Infrastructure" icon="server">
+    GitOps via ArgoCD, per-environment CI/CD, Prometheus observability, custom Rust LLM proxy
+  </Card>
+</CardGroup>
 
-- **Bot provisioning** — generate and deploy specialized AI bots from natural language requirements
-- **Workflow orchestration** — Temporal-based delivery workflows with deterministic state transitions
-- **Governed code review** — bot-driven PR review with risk triage, policy enforcement, and remediation
-- **Domain knowledge** — client-scoped knowledge bases with document ingestion, runtime retrieval, and cited answers. Next: [production-grade hybrid retrieval](milestones/production-super-rag)
-- **Planning projection** — one-way sync to Trello/planning boards for stakeholder visibility
-- **Memory architecture** — semantic (Qdrant + Neo4j) and file-based memory per bot
+## In progress
+
+<Note>
+  **SA Knowledge Base** — Client-scoped knowledge with document ingestion, runtime retrieval, and cited answers.
+  Implementation complete. Pending first live pilot evaluation.
+</Note>
 
 ## Platform components
 
 | Component | Purpose |
 |---|---|
-| **bot-config-api** | Control plane — bot generation, deployment, workflow coordination |
-| **agentopia-gateway** | Bot runtime — LLM orchestration, Telegram/channel integration |
-| **agentopia-llm-proxy** | LLM routing — Codex OAuth, provider abstraction (Rust) |
-| **mem0-api** | Memory service — semantic search, entity graph |
-| **agentopia-ui** | Web interface — bot management, workflow monitoring |
+| **bot-config-api** | Control plane — bot provisioning, deployment, workflow coordination, governance |
+| **agentopia-gateway** | Bot runtime — LLM orchestration, tool execution, channel integration |
+| **agentopia-llm-proxy** | LLM routing — multi-provider abstraction, failover, token counting (Rust) |
+| **mem0-api** | Memory service — semantic search (Qdrant), entity graph (Neo4j) |
+| **agentopia-ui** | Web interface — bot management, workflow monitoring, knowledge management |
 
 ## Repositories
 
 | Repo | Contents |
 |---|---|
-| [agentopia-protocol](https://github.com/ai-agentopia/agentopia-protocol) | Backend services: bot-config-api, gateway, mem0-api, llm-proxy |
-| [agentopia-infra](https://github.com/ai-agentopia/agentopia-infra) | Helm charts, ArgoCD manifests, deployment scripts |
+| [agentopia-protocol](https://github.com/ai-agentopia/agentopia-protocol) | Backend: bot-config-api, gateway, mem0-api, llm-proxy, knowledge-api |
+| [agentopia-infra](https://github.com/ai-agentopia/agentopia-infra) | Helm charts, ArgoCD manifests, Vault config |
 | [agentopia-ui](https://github.com/ai-agentopia/agentopia-ui) | React web frontend |
 | [agentopia-core](https://github.com/ai-agentopia/agentopia-core) | Gateway runtime (OpenClaw fork) |
-
-## Quick links
-
-<CardGroup cols={2}>
-  <Card title="Architecture Overview" icon="sitemap" href="/architecture/overview">
-    System components, data flow, and deployment topology
-  </Card>
-  <Card title="A2A Protocol" icon="arrows-rotate" href="/architecture/a2a-full-design">
-    Agent-to-Agent communication design
-  </Card>
-  <Card title="Bot Config API" icon="robot" href="/product/bot-config-api">
-    API reference for bot provisioning and management
-  </Card>
-  <Card title="Fresh Deploy Runbook" icon="rocket" href="/runbooks/fresh-deploy">
-    Zero-to-deployed guide for new clusters
-  </Card>
-</CardGroup>

@@ -27,6 +27,16 @@ Additional providers can be added by registering their API key and model configu
 
 When creating a bot, the operator selects a provider and model. This selection is written into the agent's configuration and honored at startup. Each bot runs on exactly one primary model.
 
+### Post-Deploy Provider/Model Change
+
+Operators can change a bot's provider and model after deployment from the Bot Settings page. The change patches the bot's ArgoCD Application configuration and triggers an automatic pod rollout via GitOps.
+
+<Warning>
+  Changing provider/model restarts the bot pod. Expect brief downtime (~30 seconds). Ensure the API key for the target provider is configured in Vault before switching.
+</Warning>
+
+The provider/model selector in the UI loads from the platform's provider catalog API. The operator sees human-readable labels (e.g. "Claude Opus 4.6") and the platform submits the full catalog value (e.g. `anthropic/claude-opus-4-6`) to the backend.
+
 ### Runtime Failover
 
 If the primary model fails (rate limit, auth error, timeout), the agent automatically tries configured fallback models in order. Fallbacks are explicit — only pre-configured models are attempted.

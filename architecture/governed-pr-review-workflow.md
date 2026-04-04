@@ -19,8 +19,21 @@ When a pull request is opened or updated, the platform receives the event and or
 5. **Review execution** — The reviewer bot inspects the code, reasons over changes against the review policy, and publishes its review on GitHub.
 6. **Completion verification** — The platform confirms the review was posted and records the outcome.
 
-```
-PR Event → Intake → Run Tracking → Context Assembly → Reviewer Bot → GitHub Review → Verification
+```mermaid
+sequenceDiagram
+    participant GH as GitHub
+    participant CP as Control Plane
+    participant RB as Reviewer Bot
+    
+    GH->>CP: PR opened / updated (webhook)
+    CP->>CP: Validate repo onboarded + dedup
+    CP->>CP: Create review run + load policy
+    CP->>CP: Fetch changed files + assemble context
+    CP->>RB: Dispatch review (A2A)
+    RB->>RB: Inspect code against policy
+    RB->>GH: Publish structured review
+    RB->>CP: Report completion
+    CP->>CP: Verify review posted + record outcome
 ```
 
 ---

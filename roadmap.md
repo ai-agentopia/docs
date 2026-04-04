@@ -49,7 +49,10 @@ React-based unified web app (P1 milestone, closed 2026-03-30).
 - Dual-lane product: Communication (chat with any bot via WebSocket) + Workflow (start deliveries, track phases, view artifacts)
 - Bot management: create, deploy, stop, start, restart, delete through the UI
 - Role-based UI gating: orchestrator bots show workflow controls, worker/reviewer bots show read-only views
-- Multi-provider model selection: Anthropic, OpenAI, OpenRouter, Fireworks, Groq, Together, DeepSeek
+- Multi-provider model selection: Anthropic, OpenAI, OpenRouter, Fireworks — per-bot provider/model editable after deploy
+- Workflow cancel with structured cleanup: operator-initiated cancel, honest partial-cleanup reporting, durable cleanup result persisted in workflow detail
+- Delivery target validation: fail-closed allowlist, GitHub slug format enforcement, source issue reuse
+- Canceled workflow timeline: reflects actual last phase reached (not false full-completion)
 
 ### Infrastructure & Operations
 
@@ -120,4 +123,8 @@ Items below have GitHub milestones and/or design docs but no active execution.
 
 | Milestone | Date | Summary |
 |---|---|---|
+| **Workflow Cancel + Cleanup** | 2026-04-04 | Operator-initiated workflow cancel with structured cleanup, durable partial-cleanup reporting, honest Temporal divergence handling |
+| **Delivery Target Validation** | 2026-04-04 | Fail-closed repo allowlist, slug format enforcement, source issue reuse for workflow retry |
+| **Canceled Timeline Fix** | 2026-04-04 | Canceled workflows reflect actual last phase reached, not false full-completion |
+| **Dispatch Timeout + Retry** | 2026-04-04 | 10-minute dispatch timeout (up from 5), timeout treated as retryable instead of terminal failure |
 | **P1 — Web-App Primary Dual-Lane MVP** | 2026-03-30 | Web app as primary operator path. Dual-lane: Communication + Workflow. [Tracking](milestones/p1-web-app-primary-dual-lane-mvp) |
