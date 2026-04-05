@@ -1,190 +1,170 @@
+# Agentopia Platform Overview — clean left-to-right flow
+# Layout: Operator → SA → Developer → PR → Reviewer → Merged
+
 direction: right
 
-# ── Styling ──────────────────────────────────────────
-classes: {
-  operator: {
-    style: {
-      fill: "#1e1b4b"
-      stroke: "#6366f1"
-      border-radius: 12
-      font-color: "#e0e7ff"
-      font-size: 14
-    }
-  }
-  platform: {
-    style: {
-      fill: "#172554"
-      stroke: "#3b82f6"
-      border-radius: 12
-      font-color: "#bfdbfe"
-      font-size: 14
-    }
-  }
-  agent: {
-    style: {
-      fill: "#1e293b"
-      stroke: "#6366f1"
-      border-radius: 8
-      font-color: "#c7d2fe"
-      font-size: 13
-    }
-  }
-  governance: {
-    style: {
-      fill: "#1c1917"
-      stroke: "#f59e0b"
-      border-radius: 8
-      font-color: "#fde68a"
-      font-size: 13
-      stroke-dash: 4
-    }
-  }
-  output: {
-    style: {
-      fill: "#052e16"
-      stroke: "#22c55e"
-      border-radius: 8
-      font-color: "#bbf7d0"
-      font-size: 13
-    }
-  }
-  artifact: {
-    style: {
-      fill: "#14532d"
-      stroke: "#4ade80"
-      border-radius: 6
-      font-color: "#dcfce7"
-      font-size: 12
-    }
+# ── Top-level shapes (flat, no nested containers for cleaner layout) ──
+
+operator: {
+  label: "Operator\n(Web App)"
+  shape: rectangle
+  style: {
+    fill: "#312e81"
+    stroke: "#818cf8"
+    border-radius: 10
+    font-color: "#e0e7ff"
+    font-size: 16
+    bold: true
   }
 }
 
-# ── Operator ─────────────────────────────────────────
-operator: Operator {
-  class: operator
-  web: Web App {
-    class: operator
-    style.fill: "#312e81"
-  }
-  objective: Define Objective {
-    class: operator
-    style.fill: "#3730a3"
-  }
-}
-
-# ── Platform ─────────────────────────────────────────
-platform: Agentopia Platform {
-  class: platform
-
-  sa: Solution Architect {
-    class: agent
-    label: "Solution Architect\nPlans & coordinates"
-  }
-
-  dev: Developer Agent {
-    class: agent
-    label: "Developer Agent\nWrites code"
-  }
-
-  reviewer: Code Reviewer {
-    class: agent
-    label: "Code Reviewer\nReviews PRs"
-  }
-
-  governance: Governance Layer {
-    class: governance
-    label: "Governance\nPolicy enforcement"
+sa: {
+  label: "Solution\nArchitect"
+  shape: rectangle
+  style: {
+    fill: "#1e1b4b"
+    stroke: "#6366f1"
+    border-radius: 10
+    font-color: "#c7d2fe"
+    font-size: 16
+    bold: true
   }
 }
 
-# ── Delivery Artifacts ───────────────────────────────
-artifacts: Delivery Artifacts {
-  class: output
-
-  pr: Pull Request {
-    class: artifact
-  }
-  review: Code Review {
-    class: artifact
-  }
-  merged: Merged Code {
-    class: artifact
+dev: {
+  label: "Developer\nAgent"
+  shape: rectangle
+  style: {
+    fill: "#1e1b4b"
+    stroke: "#6366f1"
+    border-radius: 10
+    font-color: "#c7d2fe"
+    font-size: 16
+    bold: true
   }
 }
 
-# ── Flow ─────────────────────────────────────────────
-operator.objective -> platform.sa: starts workflow {
+pr: {
+  label: "Pull\nRequest"
+  shape: rectangle
+  style: {
+    fill: "#14532d"
+    stroke: "#4ade80"
+    border-radius: 10
+    font-color: "#bbf7d0"
+    font-size: 16
+    bold: true
+  }
+}
+
+reviewer: {
+  label: "Code\nReviewer"
+  shape: rectangle
+  style: {
+    fill: "#1e1b4b"
+    stroke: "#6366f1"
+    border-radius: 10
+    font-color: "#c7d2fe"
+    font-size: 16
+    bold: true
+  }
+}
+
+merged: {
+  label: "Merged\nCode"
+  shape: rectangle
+  style: {
+    fill: "#052e16"
+    stroke: "#22c55e"
+    border-radius: 10
+    font-color: "#dcfce7"
+    font-size: 16
+    bold: true
+  }
+}
+
+governance: {
+  label: "Governance Layer"
+  shape: rectangle
+  style: {
+    fill: "#451a03"
+    stroke: "#f59e0b"
+    border-radius: 10
+    font-color: "#fde68a"
+    font-size: 14
+    stroke-dash: 5
+  }
+}
+
+# ── Main flow (left to right) ────────────────────────
+
+operator -> sa: "defines\nobjective" {
   style: {
     stroke: "#818cf8"
     font-color: "#a5b4fc"
-    font-size: 12
+    font-size: 13
+    stroke-width: 2
   }
 }
 
-platform.sa -> platform.dev: assigns work {
+sa -> dev: "assigns\nwork" {
   style: {
     stroke: "#818cf8"
     font-color: "#a5b4fc"
-    font-size: 12
+    font-size: 13
+    stroke-width: 2
   }
 }
 
-platform.dev -> artifacts.pr: creates {
+dev -> pr: "creates" {
   style: {
     stroke: "#4ade80"
     font-color: "#86efac"
-    font-size: 12
+    font-size: 13
+    stroke-width: 2
   }
 }
 
-artifacts.pr -> platform.reviewer: dispatches {
+pr -> reviewer: "dispatches" {
   style: {
     stroke: "#818cf8"
     font-color: "#a5b4fc"
-    font-size: 12
+    font-size: 13
+    stroke-width: 2
   }
 }
 
-platform.reviewer -> artifacts.review: publishes {
+reviewer -> merged: "approves" {
   style: {
     stroke: "#4ade80"
     font-color: "#86efac"
-    font-size: 12
+    font-size: 13
+    stroke-width: 2
   }
 }
 
-artifacts.review -> artifacts.merged: approved {
-  style: {
-    stroke: "#4ade80"
-    font-color: "#86efac"
-    font-size: 12
-  }
-}
+# ── Governance (below, simple) ───────────────────────
 
-# ── Governance enforcement (dashed) ──────────────────
-platform.governance -> platform.sa: enforces {
+governance -> sa: "" {
   style: {
     stroke: "#f59e0b"
-    stroke-dash: 5
-    font-color: "#fcd34d"
-    font-size: 11
+    stroke-dash: 4
+    stroke-width: 1
   }
 }
 
-platform.governance -> platform.dev: enforces {
+governance -> dev: "" {
   style: {
     stroke: "#f59e0b"
-    stroke-dash: 5
-    font-color: "#fcd34d"
-    font-size: 11
+    stroke-dash: 4
+    stroke-width: 1
   }
 }
 
-platform.governance -> platform.reviewer: enforces {
+governance -> reviewer: "" {
   style: {
     stroke: "#f59e0b"
-    stroke-dash: 5
-    font-color: "#fcd34d"
-    font-size: 11
+    stroke-dash: 4
+    stroke-width: 1
   }
 }
