@@ -1,0 +1,190 @@
+direction: right
+
+# ── Styling ──────────────────────────────────────────
+classes: {
+  operator: {
+    style: {
+      fill: "#1e1b4b"
+      stroke: "#6366f1"
+      border-radius: 12
+      font-color: "#e0e7ff"
+      font-size: 14
+    }
+  }
+  platform: {
+    style: {
+      fill: "#172554"
+      stroke: "#3b82f6"
+      border-radius: 12
+      font-color: "#bfdbfe"
+      font-size: 14
+    }
+  }
+  agent: {
+    style: {
+      fill: "#1e293b"
+      stroke: "#6366f1"
+      border-radius: 8
+      font-color: "#c7d2fe"
+      font-size: 13
+    }
+  }
+  governance: {
+    style: {
+      fill: "#1c1917"
+      stroke: "#f59e0b"
+      border-radius: 8
+      font-color: "#fde68a"
+      font-size: 13
+      stroke-dash: 4
+    }
+  }
+  output: {
+    style: {
+      fill: "#052e16"
+      stroke: "#22c55e"
+      border-radius: 8
+      font-color: "#bbf7d0"
+      font-size: 13
+    }
+  }
+  artifact: {
+    style: {
+      fill: "#14532d"
+      stroke: "#4ade80"
+      border-radius: 6
+      font-color: "#dcfce7"
+      font-size: 12
+    }
+  }
+}
+
+# ── Operator ─────────────────────────────────────────
+operator: Operator {
+  class: operator
+  web: Web App {
+    class: operator
+    style.fill: "#312e81"
+  }
+  objective: Define Objective {
+    class: operator
+    style.fill: "#3730a3"
+  }
+}
+
+# ── Platform ─────────────────────────────────────────
+platform: Agentopia Platform {
+  class: platform
+
+  sa: Solution Architect {
+    class: agent
+    label: "Solution Architect\nPlans & coordinates"
+  }
+
+  dev: Developer Agent {
+    class: agent
+    label: "Developer Agent\nWrites code"
+  }
+
+  reviewer: Code Reviewer {
+    class: agent
+    label: "Code Reviewer\nReviews PRs"
+  }
+
+  governance: Governance Layer {
+    class: governance
+    label: "Governance\nPolicy enforcement"
+  }
+}
+
+# ── Delivery Artifacts ───────────────────────────────
+artifacts: Delivery Artifacts {
+  class: output
+
+  pr: Pull Request {
+    class: artifact
+  }
+  review: Code Review {
+    class: artifact
+  }
+  merged: Merged Code {
+    class: artifact
+  }
+}
+
+# ── Flow ─────────────────────────────────────────────
+operator.objective -> platform.sa: starts workflow {
+  style: {
+    stroke: "#818cf8"
+    font-color: "#a5b4fc"
+    font-size: 12
+  }
+}
+
+platform.sa -> platform.dev: assigns work {
+  style: {
+    stroke: "#818cf8"
+    font-color: "#a5b4fc"
+    font-size: 12
+  }
+}
+
+platform.dev -> artifacts.pr: creates {
+  style: {
+    stroke: "#4ade80"
+    font-color: "#86efac"
+    font-size: 12
+  }
+}
+
+artifacts.pr -> platform.reviewer: dispatches {
+  style: {
+    stroke: "#818cf8"
+    font-color: "#a5b4fc"
+    font-size: 12
+  }
+}
+
+platform.reviewer -> artifacts.review: publishes {
+  style: {
+    stroke: "#4ade80"
+    font-color: "#86efac"
+    font-size: 12
+  }
+}
+
+artifacts.review -> artifacts.merged: approved {
+  style: {
+    stroke: "#4ade80"
+    font-color: "#86efac"
+    font-size: 12
+  }
+}
+
+# ── Governance enforcement (dashed) ──────────────────
+platform.governance -> platform.sa: enforces {
+  style: {
+    stroke: "#f59e0b"
+    stroke-dash: 5
+    font-color: "#fcd34d"
+    font-size: 11
+  }
+}
+
+platform.governance -> platform.dev: enforces {
+  style: {
+    stroke: "#f59e0b"
+    stroke-dash: 5
+    font-color: "#fcd34d"
+    font-size: 11
+  }
+}
+
+platform.governance -> platform.reviewer: enforces {
+  style: {
+    stroke: "#f59e0b"
+    stroke-dash: 5
+    font-color: "#fcd34d"
+    font-size: 11
+  }
+}

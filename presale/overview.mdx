@@ -33,36 +33,8 @@ Software teams spend significant effort on repetitive delivery tasks: creating b
 
 ## How It Works
 
-```mermaid
-graph LR
-    subgraph Operator["Operator (Web App)"]
-        START["Define objective"]
-    end
-
-    subgraph Agentopia["Agentopia Platform"]
-        SA["Solution Architect<br/>Plans & coordinates"]
-        DEV["Developer Agent<br/>Writes code"]
-        QA["Code Reviewer<br/>Reviews PRs"]
-        GOV["Governance Layer<br/>Enforces policy"]
-    end
-
-    subgraph Output["Delivery Artifacts"]
-        PR["Pull Request"]
-        REVIEW["Code Review"]
-        MERGE["Merged Code"]
-    end
-
-    START --> SA
-    SA -->|assigns work| DEV
-    DEV -->|creates| PR
-    PR -->|dispatches| QA
-    QA -->|approves/requests changes| REVIEW
-    REVIEW --> MERGE
-
-    GOV -.->|enforces| DEV
-    GOV -.->|enforces| QA
-    GOV -.->|enforces| SA
-```
+<img className="block dark:hidden" src="/images/platform-overview-light.svg" alt="Agentopia platform overview — operator defines objective, solution architect plans, developer writes code, reviewer evaluates, governance enforces policy" />
+<img className="hidden dark:block" src="/images/platform-overview-dark.svg" alt="Agentopia platform overview — operator defines objective, solution architect plans, developer writes code, reviewer evaluates, governance enforces policy" />
 
 1. **Operator defines an objective** — "Build a contact page for our web app"
 2. **Solution architect plans** — creates milestone, issues, and work breakdown
