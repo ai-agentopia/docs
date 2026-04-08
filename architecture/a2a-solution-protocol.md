@@ -208,9 +208,11 @@ The production target is achieved through a hybrid architecture:
 |---|---|---|---|
 | **Agentopia** | FastAPI + Gateway | Domain state (Postgres), role contracts, governance auth, GitHub execution, bot runtime | Orchestration durability, planning decisions, long-running coordination |
 | **Temporal** | Temporal Server + Workers | Durable orchestration lifecycle, signal/update handling, retry/timeout, activity scheduling | Business rules, domain state, GitHub artifacts, LLM reasoning |
-| **LangGraph** | Python within Temporal activities | Planning decisions, multi-agent reasoning, supervisor routing (ephemeral cognitive state) | Durable execution, domain persistence, orchestration lifecycle |
+| **LangGraph** | Dedicated service (`agentopia-graph-executor`) | Planning decomposition, review analysis, supervisor routing (ephemeral cognitive state) | Durable execution, domain persistence, orchestration lifecycle |
 
-**Why hybrid:** Agentopia excels at governed execution but is not designed for durable long-running coordination or LLM-based planning. Temporal provides durable event-driven orchestration. LangGraph provides cognitive multi-agent reasoning. Building all three inside Agentopia would mean reinventing these runtimes.
+**Why hybrid:** Agentopia excels at governed execution but is not designed for durable long-running coordination or LLM-based planning. Temporal provides durable event-driven orchestration. LangGraph provides cognitive multi-agent reasoning via a dedicated service (`agentopia-graph-executor`). Building all three inside Agentopia would mean reinventing these runtimes.
+
+> **Note (2026-04-08):** LangGraph execution was extracted from embedded Temporal activities into `agentopia-graph-executor` as a standalone service. See ADR-008 in agentopia-protocol for rationale.
 
 ### 5.2 Layer Ownership Model
 
@@ -238,11 +240,12 @@ The production target is achieved through a hybrid architecture:
 ├──────────────┼──────────────────────────────────────────────┤
 │              │                                              │
 │  LANGGRAPH   │  Cognitive decisions (ephemeral):             │
-│  (In-memory, │  - Planning decomposition                    │
-│   no persist)│  - Review analysis                           │
-│              │  - Actor routing selection                    │
-│              │  - Runs ONLY inside Temporal activities       │
-│              │  - NO I/O, NO service imports                 │
+│  (graph-     │  - Planning decomposition                    │
+│   executor   │  - Review analysis (reviewer-shadow)         │
+│   service)   │  - Actor routing (still in protocol)         │
+│              │  - Runs in agentopia-graph-executor service   │
+│              │  - Called via HTTP from Temporal activities    │
+│              │  - NO persistence, NO GitHub I/O              │
 │              │                                              │
 ├──────────────┼──────────────────────────────────────────────┤
 │              │                                              │
@@ -260,7 +263,7 @@ Two distinct integration patterns:
 - **Inbound (Temporal → Agentopia):** Activities in `integration/temporal/` call Agentopia services. Anti-corruption boundary for data translation and idempotency.
 - **Outbound (Agentopia → Temporal):** `infrastructure/orchestration/temporal_client.py` signals running Temporal workflows (e.g., webhook received).
 
-LangGraph runs exclusively inside Temporal activities. No direct service calls. Pure cognitive: receives data, returns decisions.
+LangGraph graphs run in `agentopia-graph-executor`, a dedicated service. Temporal activities in bot-config-api call graph-executor over HTTP (`POST /v1/graphs/{name}/invoke`). Graph-executor is pure cognitive: receives data, returns reasoning output, has no persistence or GitHub I/O. Actor routing (`routing_graph.py`) remains protocol-owned as it requires no LLM. All LLM inference routes through `agentopia-llm-proxy`.
 
 ---
 
