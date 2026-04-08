@@ -18,7 +18,7 @@ graph TB
 
     subgraph External["External Services"]
         GH["GitHub"]
-        LLM["LLM Providers"]
+        PROVIDERS["LLM Providers"]
     end
 
     subgraph Platform["Agentopia Platform"]
@@ -39,8 +39,16 @@ graph TB
 
         subgraph Orchestration["Durable Orchestration"]
             TEMPORAL["Workflow Engine"]
-            PLANNER["AI Planner"]
             ROUTER["Agent Router"]
+        end
+
+        subgraph Reasoning["Reasoning Service"]
+            PLANNER["Planner Graph"]
+            REVIEWER["Reviewer Shadow"]
+        end
+
+        subgraph LLMLayer["LLM Routing"]
+            PROXY["LLM Proxy"]
         end
 
         subgraph Agents["Agent Pods"]
@@ -59,12 +67,16 @@ graph TB
     APP -->|"Manage bots"| ADMIN
 
     CHAT -->|"Proxy"| BOT_SA & BOT_DEV & BOT_QA
-    BOT_SA & BOT_DEV & BOT_QA -->|"LLM calls"| LLM
     BOT_SA & BOT_DEV & BOT_QA -->|"Authorization"| GOVS
 
     DISPATCH -->|"Task dispatch"| BOT_DEV & BOT_QA
     GOVS -->|"Code operations"| GH
-    TEMPORAL --> PLANNER & ROUTER
+    TEMPORAL -->|"Schedule"| ROUTER
+
+    Core -->|"Plan request"| Reasoning
+    Reasoning -->|"LLM inference"| PROXY
+    Core -->|"LLM inference"| PROXY
+    PROXY -->|"Route"| PROVIDERS
 
     Core --> DB
     TEMPORAL --> DB
