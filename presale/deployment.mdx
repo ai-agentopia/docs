@@ -103,14 +103,9 @@ All dependencies are open-source and Kubernetes-native. No vendor lock-in.
 
 ## Live Environments
 
-Agentopia ships with separate environments for development and production validation:
+Agentopia ships with separate development and validation environments. Each environment runs as an independent Kubernetes namespace with its own services, storage, and LLM routing. Environments are isolated from each other and promoted independently via ArgoCD.
 
-| Environment | URL | Purpose |
-|---|---|---|
-| **Dev** | `dev.agentopia.vn` | Active development — latest builds, feature flags on |
-| **UAT** | `uat.agentopia.vn` | Pre-production validation — production-like config, stable builds |
-
-Each environment runs as an independent Kubernetes namespace with its own services, storage, and LLM routing. Environments are promoted independently via ArgoCD.
+Environment access is controlled — contact your Agentopia administrator for access details.
 
 ## Scaling Model
 
