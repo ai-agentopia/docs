@@ -20,41 +20,48 @@ status: "ACTIVE"
 ## Phase Map
 
 ```
-Phase 0: Baselines + Architecture Lock
+Phase 0: Baselines + Architecture Lock  [all teams]
     │  gate: baselines documented, architecture approved,
     │        harness architecture decision recorded
     ▼
-Phase 1: Control-Plane Routing  ────────────────────────────────┐
-    │  gate: misroute rate ≤ 5% across all families              │
-    ▼                                                            │ parallel
-Phase 2: Operational State Plane  ──────────────────────────────┘
+Phase 1: Control-Plane Routing  [agentopia-protocol] ───────────────┐
+    │  gate: misroute rate ≤ 5% across all families                  │
+    ▼                                                                │ parallel
+Phase 2: Operational State Plane  [agentopia-protocol] ─────────────┘
     │  gate: operational_state and planning_readiness
     │        fully covered by governance-bridge
     ▼
-Phase 2.5: Harness Formalization (bot-config-api)  ─────────────── parallel from Phase 2
+Phase 2.5: Harness Formalization (bot-config-api)  [agentopia-protocol]  ── parallel from Phase 2
     │  gate: route policy registry spec approved;
     │        tool binding schema approved;
     │        Phase 3+ unblocked
     ▼
-Phase 3: Knowledge Ingestion Pilot  (Pathway preferred; mixed-arch under discussion)
+Phase RB: agentopia-rag-platform Bootstrap  [agentopia-rag-platform — new repo]
+    │  gate: repo created, CI passing, service structure approved,
+    │        migration sequencing confirmed, agentopia-knowledge-ingest
+    │        and agentopia-super-rag deprecation timeline recorded
+    ▼
+Phase 3: Knowledge Ingestion Pilot  [agentopia-rag-platform]
+    │        (Pathway preferred; mixed-arch under discussion)
     │  gate: nDCG@5 ≥ 0.90 on pilot scope, freshness lag confirmed
     ▼
-Phase 4: Knowledge Ingestion Primary + Multi-Source
+Phase 4: Knowledge Ingestion Primary + Multi-Source  [agentopia-rag-platform]
     │  gate: all scopes migrated, nDCG@5 ≥ 0.925, freshness SLO met
     ▼
-Phase 5: Retrieval Quality Upgrades  (conditional — evidence-gated)
+Phase 5: Retrieval Quality Upgrades  [agentopia-rag-platform]  (conditional — evidence-gated)
     │  gate: ≥ 3% nDCG@5 improvement required to proceed
     ▼
-Phase 6: Observability + SLO Enforcement  (parallel from Phase 3)
+Phase 6: Observability + SLO Enforcement  [agentopia-rag-platform + agentopia-protocol]  (parallel from Phase 3)
     │  gate: all SLOs defined and measurable in Grafana
     ▼
-Phase 7: Production Cutover + Rollback Verification
-    │  gate: legacy ingest frozen, rollback drill passed
+Phase 7: Production Cutover + Legacy Deprecation  [agentopia-rag-platform]
+    │  gate: legacy ingest frozen, rollback drill passed,
+    │        agentopia-knowledge-ingest and agentopia-super-rag deprecated
     ▼
-  HARNESS_AND_RAG_ARCHITECTURE_DOC_READY
+  HARNESS_AND_RAG_IMPLEMENTATION_COMPLETE
 ```
 
-Phases 1 and 2 can run in parallel. Phase 2.5 can start alongside Phase 2. Phase 6 can start alongside Phase 3.
+Phases 1 and 2 can run in parallel. Phase 2.5 can start alongside Phase 2. Phase RB can start once Phase 2.5 harness boundary decisions are clear (or earlier if service boundary is already confirmed). Phase 6 can start alongside Phase 3.
 
 ---
 
@@ -322,6 +329,71 @@ This decision must be recorded in `harness-control-plane.md` or a linked ADR bef
 - [ ] Tool binding schema approved
 - [ ] Harness evolution option (B or C) decided and recorded
 - [ ] P0.4 harness open questions answered (intent router ownership, session lifecycle, eval policy)
+
+---
+
+## Phase RB: agentopia-rag-platform Bootstrap
+
+**Purpose**: Create and bootstrap `agentopia-rag-platform` as the consolidation target for the knowledge plane. This is a structural phase — it establishes the repo, CI/CD, initial service structure, and migration sequencing decision. No production traffic is moved in Phase RB.
+
+**Owner**: knowledge-ingest + super-rag teams + CTO (service boundary decision)
+
+**Dependency**: Phase 2.5 harness open questions should be answered before Phase RB final scoping. However, repo bootstrap (PRB.1) can begin earlier if the knowledge-plane service boundary is already clear from the initiative docs.
+
+**Repo**: `ai-agentopia/agentopia-rag-platform` (new)
+
+### PRB.1 — Create agentopia-rag-platform repo
+
+Create `ai-agentopia/agentopia-rag-platform` with:
+- `README.md` citing this initiative and the migration plan
+- CI: GitHub Actions for image build and push to `ghcr.io/ai-agentopia/agentopia-rag-platform`
+- `docs/` directory with canonical doc pointer to `ai-agentopia/docs`
+
+**Deliverable**: Repo created, CI passing, initial image tagged.
+
+### PRB.2 — Define service structure
+
+Define the internal structure for `agentopia-rag-platform`. This is a directory and module design exercise, not implementation. Output aligns ingest and serving teams before code migration begins.
+
+Recommended structure:
+```
+agentopia-rag-platform/
+├── src/
+│   ├── ingest/        # Pathway pipeline, source connectors, upload API
+│   ├── serving/       # Retrieval API (from agentopia-super-rag)
+│   ├── eval/          # Eval framework (from agentopia-super-rag/evaluation/)
+│   └── lifecycle/     # Document lifecycle, document_records, scope management
+├── charts/            # Helm chart for agentopia-rag-platform
+└── docs/
+```
+
+**Deliverable**: Service structure documented in `agentopia-rag-platform/docs/service-structure.md` and approved.
+
+### PRB.3 — Migration sequencing decision
+
+Confirm the two-dimensional migration approach (see `migration-plan.md`):
+1. Batch ingest → Pathway streaming (covered by Phases 3–7)
+2. `agentopia-knowledge-ingest` + `agentopia-super-rag` → `agentopia-rag-platform` consolidation
+
+**Recommended sequencing** (to be confirmed):
+- Phase 3: `agentopia-rag-platform` owns the Pathway ingest path. `agentopia-knowledge-ingest` becomes a thin upload-API-to-S3 proxy only.
+- Phase 4: All scopes migrated to Pathway inside `agentopia-rag-platform`.
+- Post Phase 4: `agentopia-super-rag` serving code migrated into `agentopia-rag-platform`. `agentopia-super-rag` deprecated.
+- Phase 7: `agentopia-knowledge-ingest` deprecated. Legacy code removal PRs.
+
+This sequences ingest migration before serving migration, reducing concurrent risk.
+
+**Decision required**: Confirm recommended sequencing or define an alternative. Record in `agentopia-rag-platform/docs/migration-sequencing.md`.
+
+**Deliverable**: Migration sequencing confirmed. Deprecation timeline for `agentopia-knowledge-ingest` and `agentopia-super-rag` recorded.
+
+### Phase RB Exit Gate
+
+- [ ] `agentopia-rag-platform` repo created and CI passing
+- [ ] Service structure documented and approved
+- [ ] Two-dimensional migration sequencing confirmed and recorded
+- [ ] Deprecation timeline for `agentopia-knowledge-ingest` and `agentopia-super-rag` recorded
+- [ ] Milestone created in `agentopia-rag-platform` for Phases 3–7 work
 
 ---
 
@@ -601,22 +673,24 @@ Each removal is a separate PR. No bundled removals.
 - [ ] Rollback drill completed and documented
 - [ ] 30-day stability window passed
 - [ ] Legacy code removal PRs merged
-- [ ] Status declared: **RAG_ARCHITECTURE_DOC_READY** if all gates pass
+- [ ] Status declared: **HARNESS_AND_RAG_IMPLEMENTATION_COMPLETE** if all gates pass
 
 ---
 
 ## Ownership Summary
 
-| Phase | Owner | Key Dependency |
-|---|---|---|
-| P0 | All teams (parallel) | None |
-| P1 | Gateway/protocol team | P0.3 complete |
-| P2 | Gateway/protocol team | P0.4 complete; can parallel with P1 |
-| P3 | knowledge-ingest + super-rag + infra | P0 complete; Pathway Helm in agentopia-infra |
-| P4 | knowledge-ingest team | P3 exit gate |
-| P5 | super-rag team | P4 complete + new eval evidence |
-| P6 | infra + super-rag + gateway teams | Starts at P3; required before P7 |
-| P7 | knowledge-ingest + infra | P4 + P6 complete |
+| Phase | Repo | Owner | Key Dependency |
+|---|---|---|---|
+| P0 | All | All teams (parallel) | None |
+| P1 | agentopia-protocol | Gateway/protocol team | P0.3 complete |
+| P2 | agentopia-protocol | Gateway/protocol team | P0.4 complete; can parallel with P1 |
+| P2.5 | agentopia-protocol | bot-config-api team | P0.4 harness open questions answered |
+| PRB | agentopia-rag-platform (new) | knowledge-ingest + super-rag + CTO | P2.5 boundary decision clear |
+| P3 | agentopia-rag-platform | agentopia-rag-platform team | PRB complete; Pathway Helm in agentopia-infra |
+| P4 | agentopia-rag-platform | agentopia-rag-platform team | P3 exit gate |
+| P5 | agentopia-rag-platform | agentopia-rag-platform team | P4 complete + new eval evidence |
+| P6 | agentopia-rag-platform + agentopia-protocol | agentopia-rag-platform + infra + gateway teams | Starts at P3; required before P7 |
+| P7 | agentopia-rag-platform | agentopia-rag-platform + infra | P4 + P6 complete |
 
 ---
 

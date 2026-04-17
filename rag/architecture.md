@@ -223,6 +223,8 @@ Answers questions about live system state: what is currently deployed, running, 
 
 Serves authoritative, versioned domain knowledge: client product documentation, API references, policies, runbooks, and curated guides.
 
+**Service owner (target)**: `agentopia-rag-platform` — a new repo that consolidates the current split between `agentopia-knowledge-ingest` (ingest, upload API, connectors) and `agentopia-super-rag` (retrieval serving, Qdrant management, eval framework) into a single knowledge-plane owner. The consolidation is covered in `migration-plan.md`. The component descriptions below describe the target architecture that `agentopia-rag-platform` will own.
+
 **Pathway** is the current preferred candidate for the knowledge data plane. A mixed-architecture remains under discussion — see the candidate evaluation in README.md. Pathway's responsibilities in the current preferred design:
 - Continuous connector polling from source systems (S3, GitHub, Google Drive, Confluence — connector availability requires verification per source)
 - Change detection via differential dataflow: inserts, updates, and deletes are native stream events
@@ -432,15 +434,18 @@ W-series outcomes from `agentopia-super-rag/docs/evaluation.md` remain in effect
 
 ---
 
-## 9. Service Ownership After Full Migration
+## 9. Service Ownership — Current and Target
 
-| Service | Role | Changed by this initiative? |
+| Service | Current Role | Target State |
 |---|---|---|
-| `agentopia-knowledge-ingest` | Pathway pipeline host, upload API (async), S3 staging | **Yes** — connector layer replaced by Pathway; normalizer and orchestrator deprecated |
-| `agentopia-super-rag` | Retrieval serving (Qdrant), eval framework, document lifecycle | **No** — unchanged |
+| `agentopia-knowledge-ingest` | Upload API, S3 artifacts, orchestrator, connectors | **Deprecated** — ingest and connector layer migrated to `agentopia-rag-platform`; normalizer and orchestrator removed after Phase 7 |
+| `agentopia-super-rag` | Retrieval serving (Qdrant), chunking, embedding, eval framework, document lifecycle | **Migrated** → serving and eval code moves to `agentopia-rag-platform` after Phase 4 |
+| `agentopia-rag-platform` | _(does not exist yet — bootstrapped in Phase RB)_ | **New owner** — knowledge plane consolidation target. Owns: Pathway ingest pipeline, upload API, retrieval serving, Qdrant lifecycle, eval framework |
 | `agentopia-protocol` (bot-config-api) | Scope binding, bot CRUD | **Minor** — `scope_ingest_mode` flag added per scope for migration |
-| `agentopia-protocol` (gateway) | Control plane, plugin chain | **Yes** — intent router added; governance-bridge extended; `NON_KB_PATTERNS` extended |
-| `agentopia-infra` | Helm charts, ArgoCD apps | **Yes** — Pathway deployment, state PVC, connector secrets |
+| `agentopia-protocol` (gateway) | Runtime execution plane, plugin chain | **Yes** — intent router added; governance-bridge extended; `NON_KB_PATTERNS` extended |
+| `agentopia-infra` | Helm charts, ArgoCD apps | **Yes** — `agentopia-rag-platform` Helm chart added; Pathway deployment, state PVC, connector secrets |
+
+`agentopia-rag-platform` is the anchor for all knowledge-plane work from Phase 3 onwards. See `migration-plan.md` for the two-dimensional migration sequencing: (1) batch ingest → Pathway streaming, (2) `agentopia-knowledge-ingest` + `agentopia-super-rag` → `agentopia-rag-platform` consolidation.
 
 ---
 

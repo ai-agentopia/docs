@@ -172,7 +172,7 @@ Five planes. Each has a distinct role, a single authoritative source of truth, a
 | **Control Plane** | Bot identity, policy authority, tool registry, scope/auth, lifecycle, route policy declaration | `bot-config-api` (harness) | All (policy only — no per-request execution) |
 | **Runtime Execution Plane** | Per-request: context assembly, tool invocation, model call, response | `gateway` + embedded runner | All (stateless execution within declared policy) |
 | **Operational State Plane** | Live system state: workflow status, bot config, deployment state | Temporal, K8s API, GitHub API, bot-config-api | `operational_state`, `planning_readiness` |
-| **Knowledge Plane** | Versioned domain knowledge from source documents | Source systems → ingest pipeline → Qdrant | `knowledge_query` |
+| **Knowledge Plane** | Versioned domain knowledge from source documents | `agentopia-rag-platform` (target) — currently split across `agentopia-knowledge-ingest` (ingest) + `agentopia-super-rag` (serving) | `knowledge_query` |
 | **Memory Plane** | User-session episodic facts and entity graph | Session JSONL → mem0-api → Qdrant + Neo4j | `memory_query` |
 
 The Control Plane and Runtime Execution Plane are the new first-class distinction. The previous four-plane model collapsed these two into "Control Plane — Gateway plugin chain," which obscured the policy/execution boundary. See `harness-control-plane.md` for the full ownership analysis.
@@ -185,8 +185,8 @@ The Control Plane and Runtime Execution Plane are the new first-class distinctio
 |---|---|
 | [harness-control-plane.md](harness-control-plane.md) | Harness architecture: what a control plane owns, bot-config-api current role vs target role, 5-plane decomposition, responsibility taxonomy, ownership split recommendation, open questions |
 | [architecture.md](architecture.md) | Query family model, 5-plane architecture, control-plane routing (current vs target), Pathway data pipeline, source-of-truth table, diagrams |
-| [implementation-plan.md](implementation-plan.md) | 7-phase implementation program: harness formalization + control-plane routing + knowledge-plane streaming |
-| [migration-plan.md](migration-plan.md) | Knowledge-plane migration only: current batch ingest → Pathway streaming, cutover sequence, rollback paths |
+| [implementation-plan.md](implementation-plan.md) | Implementation program: control-plane routing (agentopia-protocol) + agentopia-rag-platform bootstrap + knowledge-plane migration and serving consolidation |
+| [migration-plan.md](migration-plan.md) | Two-dimensional migration: (1) batch ingest → streaming pipeline, (2) agentopia-knowledge-ingest + agentopia-super-rag → agentopia-rag-platform consolidation |
 | [evals-and-slos.md](evals-and-slos.md) | SLOs for all 5 dimensions: route correctness (per family), retrieval quality, freshness, contamination, latency |
 
 ---

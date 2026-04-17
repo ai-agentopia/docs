@@ -3,15 +3,23 @@ title: "Agentopia RAG — Migration Plan"
 status: "ACTIVE"
 ---
 
-# Migration Plan: Batch Ingest → Pathway Streaming
+# Migration Plan: Two-Dimensional Knowledge Platform Migration
 
 ## Scope
 
-This document covers the **knowledge-plane migration only**: the transition from the current operator-driven batch ingest to Pathway streaming. Control-plane routing changes (intent router, governance-bridge extension, pattern updates) are covered in `implementation-plan.md` Phases 1–2 and do not interact with this migration.
+This document covers the **knowledge-plane migration** across two dimensions:
+
+1. **Ingest path migration** — transition from operator-driven batch ingest to Pathway streaming. This covers pipeline mechanics: source connectors, change detection, delete propagation, freshness SLO.
+
+2. **Service consolidation** — migration from the current split architecture (`agentopia-knowledge-ingest` + `agentopia-super-rag`) to a single consolidated service (`agentopia-rag-platform`). This covers which code moves where, deprecation sequencing, and service ownership transfer.
+
+These dimensions are coupled: `agentopia-rag-platform` is the service that will run the Pathway pipeline. The ingest path migration and the service consolidation are sequenced together, not independently.
+
+Control-plane routing changes (intent router, governance-bridge extension, pattern updates) are covered in `implementation-plan.md` Phases 1–2 and do not interact with this migration.
 
 ## Purpose
 
-This document defines the current knowledge-plane state precisely, the transitional architecture during co-existence, the cutover sequence, and rollback paths.
+This document defines the current knowledge-plane state precisely, the consolidation target (`agentopia-rag-platform`), the transitional architecture during co-existence, the cutover sequence, and rollback paths.
 
 ---
 
@@ -41,11 +49,12 @@ Qdrant kb-{scope_hash} collection updated
 
 ### 1.2 Services and Responsibilities
 
-| Service | Owns | State |
+| Service | Current Role | Migration Target |
 |---|---|---|
-| `agentopia-knowledge-ingest` | Upload API, S3 raw/normalized artifacts, PostgreSQL document registry, orchestrator, connectors | Active |
-| `agentopia-super-rag` | Chunking, embedding, Qdrant collections, PostgreSQL document_records, retrieval serving | Active |
-| `agentopia-protocol` (bot-config-api) | Scope bindings, bot CRUD, internal token auth | Active |
+| `agentopia-knowledge-ingest` | Upload API, S3 raw/normalized artifacts, PostgreSQL document registry, orchestrator, connectors | **Deprecated** — ingest and connector layer moves to `agentopia-rag-platform`; normalizer and orchestrator removed after Phase 7 |
+| `agentopia-super-rag` | Chunking, embedding, Qdrant collections, PostgreSQL document_records, retrieval serving | **Migrated** → serving and eval code moves to `agentopia-rag-platform` after Phase 4 |
+| `agentopia-rag-platform` | _(does not exist yet)_ | **Target** — knowledge-plane consolidation owner. Owns: Pathway ingest pipeline, upload API, retrieval serving, Qdrant lifecycle, eval framework |
+| `agentopia-protocol` (bot-config-api) | Scope bindings, bot CRUD, internal token auth | **Minor** — `scope_ingest_mode` flag added per scope for migration |
 
 ### 1.3 Active Connectors
 
@@ -65,6 +74,31 @@ All three are synchronous poll wrappers invoked by the orchestrator when an oper
 - **No delete propagation** — if a document is removed from S3, its chunks remain in Qdrant with `status=active` until an operator explicitly deletes them
 - **Full re-ingest on update** — any document change triggers re-embedding of all chunks, not just changed sections
 - **Connector depth is shallow** — only S3, Google Drive, OneDrive. GitHub, Confluence, Jira are not connected
+
+---
+
+## 1.5 Consolidation Target — agentopia-rag-platform
+
+`agentopia-rag-platform` does not yet exist. It is bootstrapped in Phase RB (see `implementation-plan.md`). The consolidation follows the recommended sequencing from Phase RB.3:
+
+**Recommended sequencing:**
+
+| Phase | Ingest path | Serving path | Ownership |
+|---|---|---|---|
+| PRB | — | — | Repo bootstrap only; no traffic |
+| Phase 3 (pilot) | Pathway runs in `agentopia-rag-platform` | `agentopia-super-rag` unchanged | `agentopia-rag-platform` owns ingest for pilot scope |
+| Phase 4 (full migration) | Pathway in `agentopia-rag-platform` for all scopes | `agentopia-super-rag` unchanged | `agentopia-rag-platform` owns ingest for all scopes |
+| Post Phase 4 | `agentopia-rag-platform` (stable) | Serving code migrates from `agentopia-super-rag` → `agentopia-rag-platform` | `agentopia-rag-platform` owns both ingest + serving |
+| Phase 7 | Legacy code removed | `agentopia-super-rag` deprecated | `agentopia-rag-platform` is sole knowledge-plane owner |
+
+**Deprecation definitions:**
+- **Deprecated** = frozen; no new feature work. Maintained for bug fixes and rollback support only.
+- **Removed** = decommissioned and archived 30 days after Phase 7 exit gate passes.
+
+**Source of truth during transition:**
+- Qdrant collections remain the serving source of truth throughout. Collection names and payload schema do not change.
+- The `document_records` PostgreSQL table migrates to `agentopia-rag-platform` ownership during the serving migration (post Phase 4).
+- `scope_ingest_mode` flag in `bot-config-api` controls which service writes to each scope. The flag remains until all scopes are fully in `agentopia-rag-platform` and then is removed in Phase 7.3.
 
 ---
 
