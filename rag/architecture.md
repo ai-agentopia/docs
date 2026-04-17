@@ -1,18 +1,19 @@
 ---
-title: "Agentopia RAG — Target Architecture"
+title: "Agentopia Agentic System — Target Architecture"
 status: "ACTIVE"
 ---
 
-# RAG Target Architecture
+# Agentopia Agentic System — Target Architecture
 
 ## Overview
 
-This document defines the target architecture for the Agentopia RAG system. The system must correctly serve six distinct query families — each with a different source of truth, freshness requirement, and fallback behavior. Correct architecture requires two independently implemented concerns:
+This document defines the target architecture for the Agentopia agentic system. The system operates across five planes, each with a distinct role and a single authoritative source of truth. Correct architecture requires three independently implemented concerns:
 
-1. **Control-plane routing**: classifying each query into its family and directing it to the correct source of truth
-2. **Knowledge-plane data pipeline**: keeping document knowledge fresh via Pathway streaming into Qdrant
+1. **Harness / control-plane formalization**: `bot-config-api` as the policy authority for route policy, tool bindings, scope authorization, and lifecycle metadata
+2. **Query routing**: classifying each query into its family and directing it to the correct source of truth — implemented in the runtime execution plane (gateway), declared in the control plane
+3. **Knowledge-plane data pipeline**: keeping document knowledge fresh via a streaming ingest pipeline (Pathway, or mixed architecture) into Qdrant
 
-These concerns are additive and must not collapse into each other.
+These concerns are additive and must not collapse into each other. The harness declares policy. The runtime executes it. The knowledge plane owns freshness and retrieval quality independently.
 
 ---
 
@@ -48,7 +49,7 @@ The table below describes the target routing behavior after Phase 1 implementati
 
 ---
 
-## 2. Four-Plane Architecture
+## 2. Five-Plane Architecture
 
 ### Query Routing Flow
 
@@ -115,34 +116,56 @@ flowchart TD
 
 ## 3. Plane Definitions
 
-### 3.1 Control Plane
+### 3.1 Control Plane (Harness Authority)
 
-The gateway plugin chain implements the control plane. It is responsible for:
-1. Classifying the query into a family
-2. Routing to the correct plane(s)
-3. Assembling the final context block injected before the LLM call
-4. Enforcing suppression signals so downstream plugins do not fire on resolved queries
+`bot-config-api` is the control plane authority. It is responsible for:
+1. Bot identity and lifecycle (provisioning, ArgoCD CRD management, K8s Secret/ConfigMap management)
+2. Route policy declaration: which plugin is the primary handler for each query family per bot (target — not yet formalized; see gap analysis in `harness-control-plane.md`)
+3. Tool registry and bindings: which tools a bot may invoke, which roles may invoke which tools
+4. Scope and tenant authorization: which knowledge scopes a bot may access (`bot_knowledge_bindings`, role registry `w0_actor_bindings`)
+5. Ingest mode flags: `scope_ingest_mode` per scope (partial — Pathway migration flag)
 
-#### Current state (as implemented)
+**The control plane does not execute per-request logic.** It declares policy. The runtime execution plane executes within that policy.
 
-The current control plane uses heuristic keyword matching. There is no formal query family classification.
+For the full harness analysis — what bot-config-api currently owns vs what it should own, and the three ownership split options — see `harness-control-plane.md`.
+
+### 3.1a Runtime Execution Plane (Gateway)
+
+The gateway is the stateless runtime execution plane. It executes per-request within the policy the control plane declared. It is responsible for:
+1. Receiving user messages (Telegram connector)
+2. Assembling context before the LLM call (`before_agent_start` hooks: knowledge-retrieval, mem0-api, governance-bridge, wf-bridge)
+3. Invoking tools (plugin chain execution, MCP bridge, A2A relay)
+4. Calling the LLM (Anthropic API, Vault key per bot)
+5. Enforcing coordination signals (`event.coordination.resolvedBy`) to suppress plugins that should not fire
+
+The gateway has no authoritative state. Its plugin chain is currently configured via `configmap-config.yaml` (hardcoded). In the target state, the plugin chain is derived from the route policy declared by bot-config-api.
+
+**Current state**: No query intent classifier exists in gateway. Plugin routing is heuristic (keyword patterns). This is Gap 1.
+**Target state (Phase 1)**: Intent router classifies query family; route policy (declared by control plane) determines which plugin handles it.
+
+#### 3.1b Query Routing — Current and Target State
+
+**Current state (as implemented)**
+
+The runtime execution plane (gateway) uses heuristic keyword matching. There is no formal query family classification and no route policy registry.
 
 - **governance-bridge**: matches a fixed keyword list via regex. When matched, injects GitHub tool inventory and fires tool calls. Does not set a coordination signal that reliably suppresses other plugins.
 - **knowledge-retrieval**: fires on all queries unless the query matches `NON_KB_PATTERNS` or `event.coordination.resolvedBy` is set. Pattern list has incomplete coverage.
 - **mem0-api**: fires on all queries unless the query matches `NON_MEMORY_META_PATTERNS`. Pattern list has incomplete coverage.
 - **Coverage gaps**: query forms outside the keyword list (plural forms, paraphrases, non-English variations, readiness-class questions not matching current patterns) are misrouted.
 
-#### Target state (to be implemented in Phase 1)
+**Target state (Phase 1)**
 
-The target control plane replaces heuristic-only routing with a formal query family classification step.
+The target routing model adds a formal intent router to the gateway execution plane, backed by a route policy declared in the control plane.
 
 - An **intent router** runs before the plugin chain and assigns the query a `query_family` tag.
-- governance-bridge coverage is extended to fully handle `operational_state` and `planning_readiness` families.
-- knowledge-retrieval skips for all families except `knowledge_query` (and `general_chat` as a pass-through).
+- The **route policy** (declared by bot-config-api, embedded in bot Helm values at deploy time) maps each query family to its primary plugin handler.
+- governance-bridge is extended to fully handle `operational_state` and `planning_readiness` families.
+- knowledge-retrieval skips for all families except `knowledge_query`.
 - mem0-api skips for `operational_state`, `planning_readiness`, and `runtime_meta` families.
-- `event.coordination.resolvedBy` is set consistently when governance-bridge resolves a query, suppressing downstream retrievers.
+- `event.coordination.resolvedBy` is set consistently when governance-bridge resolves a query, suppressing downstream plugins.
 
-**The intent router design (Phase 1 scope)**: The initial implementation is an enhanced heuristic — extended pattern lists covering all six families, with clear precedence rules. An LLM-based classifier is a Phase 2+ option if heuristic coverage proves insufficient after measurement.
+**The intent router design (Phase 1 scope)**: The initial implementation uses enhanced heuristic patterns (extended keyword lists, precedence rules, confidence thresholds). An LLM-based classifier is a conditional Phase 1.5 option if heuristic coverage proves insufficient after the P1.4 gate measurement.
 
 #### Control-plane routing decision (target — Phase 1+)
 

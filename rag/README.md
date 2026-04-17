@@ -1,18 +1,19 @@
 ---
-title: "Agentopia RAG — Initiative Overview"
+title: "Agentopia Agentic System Architecture — RAG and Harness Initiative"
 status: "ACTIVE"
 decision-date: "2026-04-16"
 ---
 
-# Agentopia RAG Initiative
+# Agentopia Agentic System Architecture — RAG and Harness Initiative
 
 ## Initiative Direction
 
-> **This initiative has two independent workstreams:**
-> 1. **Control-plane hardening** — formal intent routing so every query family reaches the correct source of truth
-> 2. **Knowledge-plane streaming** — automated ingestion and freshness pipeline for the knowledge plane, with Qdrant as the serving layer
+> **This initiative covers three workstreams:**
+> 1. **Harness / control-plane formalization** — establishing `bot-config-api`'s role as a harness control plane authority: route policy registry, formal tool bindings, scope authority, and session lifecycle metadata
+> 2. **Query routing hardening** — formal intent routing so every query family reaches the correct source of truth, and no plane is triggered when it should not be
+> 3. **Knowledge-plane streaming** — automated ingestion and freshness pipeline for the knowledge plane, with Qdrant as the serving layer
 >
-> These are additive. The control plane and knowledge data plane concerns must not collapse into each other.
+> These workstreams are additive and independent. The harness declares policy. The runtime executes it. The knowledge plane owns freshness and retrieval quality. They must not collapse into each other.
 >
 > **Knowledge data plane recommendation status**: Pathway is the current preferred candidate for the knowledge ingestion layer. A mixed-architecture approach — combining multiple open-source components with Agentopia-owned routing and source-of-truth policy — remains under active discussion. The final component selection is not locked until the architecture review and P3 pilot results are complete.
 
@@ -20,13 +21,15 @@ decision-date: "2026-04-16"
 
 ## Why This Initiative
 
-Two structural gaps exist in the current system:
+Three structural gaps exist in the current system:
 
-**Gap 1 — Routing.** The current control plane classifies query intent using heuristic keyword matching. The coverage is incomplete: query families that do not match the keyword list fall through to the wrong handler. The result is that knowledge retrieval fires on queries whose answers should come from live operational state, and vice versa. This is a routing design problem, not a retrieval quality problem. The retrieval baseline (nDCG@5=0.925) is independently strong.
+**Gap 1 — Route policy is not owned by the control plane.** The current gateway plugin chain (`configmap-config.yaml:123–182`) is hardcoded. There is no intent classifier and no per-bot route policy declaration. Plugins fire based on incomplete keyword pattern lists (`NON_KB_PATTERNS`, `NON_MEMORY_META_PATTERNS`). The result: query families outside the keyword list fall through to the wrong handler — knowledge retrieval fires on operational-state queries, and vice versa. This is a routing design problem, not a retrieval quality problem. The retrieval baseline (nDCG@5=0.925) is independently strong.
 
-**Gap 2 — Freshness.** Knowledge staleness is bounded by operator action. A source document changed in S3, GitHub, or Confluence is not reflected in Qdrant until a human manually triggers an ingest. No automated polling or streaming exists. Effective lag: hours to days.
+**Gap 2 — bot-config-api's harness role is not formalized.** `bot-config-api` already self-identifies as `control-plane-api` and owns provisioning, governance policy, role registry, and knowledge scope bindings. But it does not yet own route policy, formal tool bindings, or session lifecycle metadata. As agent systems grow more complex, the harness must be the explicit authority for these declarations — not the runtime. See `harness-control-plane.md` for the full analysis.
 
-Pathway addresses Gap 2. A formalized intent router addresses Gap 1. Both must be implemented for the system to behave correctly across all query families.
+**Gap 3 — Knowledge freshness is bounded by operator action.** A source document changed in S3, GitHub, or Confluence is not reflected in Qdrant until a human manually triggers an ingest. No automated polling or streaming exists. Effective lag: hours to days.
+
+Gap 1 and Gap 2 are control-plane concerns addressed by Phases 1–2 of the implementation plan plus the harness formalization work. Gap 3 is a knowledge-plane concern addressed by Phases 3–7 (Pathway migration).
 
 ---
 
@@ -127,7 +130,13 @@ Every query a bot receives belongs to one of six families. The correct behavior 
 
 ## Goals
 
-**Control-plane goals:**
+**Harness / control-plane formalization goals:**
+- Establish bot-config-api as the explicit policy authority for route policy, tool bindings, and scope authorization
+- Add route policy registry: per-bot declaration of which plugins handle which query families (replaces hardcoded gateway plugin chain)
+- Formalize tool binding schema: per-bot tool registry as configurable declarations, not code constants
+- Define and document the control plane / runtime execution plane boundary explicitly
+
+**Query routing goals:**
 - Define query families formally and route each family to its correct source of truth
 - Reduce misroute rate to ≤ 5% across all families
 - Ensure `operational_state` and `planning_readiness` queries never trigger knowledge-plane retrieval
@@ -150,19 +159,23 @@ Every query a bot receives belongs to one of six families. The correct behavior 
 - LLM-driven multi-hop reasoning (not in scope for this initiative)
 - Real-time sub-second ingestion (Pathway at 30s poll is the target)
 - Solving every query routing edge case in Phase 1 — routing is incrementally improved against measured baselines
+- Splitting bot-config-api into harness + governance services (future consideration; not in scope now)
 
 ---
 
 ## Architecture Planes
 
-| Plane | Purpose | Source of Truth | Handles Families |
+Five planes. Each has a distinct role, a single authoritative source of truth, and must not contaminate the others.
+
+| Plane | Role | Primary Owner | Handles Families |
 |---|---|---|---|
-| **Control Plane** | Classify query family, route to correct source, compose final context | Gateway plugin chain | All (routing only) |
-| **Operational State Plane** | Live system state: workflow status, bot config, deployment state | Temporal, K8s API server, bot-config-api | `operational_state`, `planning_readiness` |
-| **Knowledge Plane** | Versioned domain knowledge from source documents | Source systems → Pathway → Qdrant | `knowledge_query` |
+| **Control Plane** | Bot identity, policy authority, tool registry, scope/auth, lifecycle, route policy declaration | `bot-config-api` (harness) | All (policy only — no per-request execution) |
+| **Runtime Execution Plane** | Per-request: context assembly, tool invocation, model call, response | `gateway` + embedded runner | All (stateless execution within declared policy) |
+| **Operational State Plane** | Live system state: workflow status, bot config, deployment state | Temporal, K8s API, GitHub API, bot-config-api | `operational_state`, `planning_readiness` |
+| **Knowledge Plane** | Versioned domain knowledge from source documents | Source systems → ingest pipeline → Qdrant | `knowledge_query` |
 | **Memory Plane** | User-session episodic facts and entity graph | Session JSONL → mem0-api → Qdrant + Neo4j | `memory_query` |
 
-Each plane has a different source of truth and must not contaminate the others. See `architecture.md` for the full isolation invariant and per-family routing rules.
+The Control Plane and Runtime Execution Plane are the new first-class distinction. The previous four-plane model collapsed these two into "Control Plane — Gateway plugin chain," which obscured the policy/execution boundary. See `harness-control-plane.md` for the full ownership analysis.
 
 ---
 
@@ -170,8 +183,9 @@ Each plane has a different source of truth and must not contaminate the others. 
 
 | Document | Covers |
 |---|---|
-| [architecture.md](architecture.md) | Query family model, 4-plane architecture, control-plane routing (current vs target), Pathway data pipeline, source-of-truth table, diagrams |
-| [implementation-plan.md](implementation-plan.md) | 7-phase implementation program covering both control-plane and knowledge-plane workstreams |
+| [harness-control-plane.md](harness-control-plane.md) | Harness architecture: what a control plane owns, bot-config-api current role vs target role, 5-plane decomposition, responsibility taxonomy, ownership split recommendation, open questions |
+| [architecture.md](architecture.md) | Query family model, 5-plane architecture, control-plane routing (current vs target), Pathway data pipeline, source-of-truth table, diagrams |
+| [implementation-plan.md](implementation-plan.md) | 7-phase implementation program: harness formalization + control-plane routing + knowledge-plane streaming |
 | [migration-plan.md](migration-plan.md) | Knowledge-plane migration only: current batch ingest → Pathway streaming, cutover sequence, rollback paths |
 | [evals-and-slos.md](evals-and-slos.md) | SLOs for all 5 dimensions: route correctness (per family), retrieval quality, freshness, contamination, latency |
 

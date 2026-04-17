@@ -21,7 +21,8 @@ status: "ACTIVE"
 
 ```
 Phase 0: Baselines + Architecture Lock
-    │  gate: baselines documented, architecture approved
+    │  gate: baselines documented, architecture approved,
+    │        harness architecture decision recorded
     ▼
 Phase 1: Control-Plane Routing  ────────────────────────────────┐
     │  gate: misroute rate ≤ 5% across all families              │
@@ -30,10 +31,15 @@ Phase 2: Operational State Plane  ───────────────�
     │  gate: operational_state and planning_readiness
     │        fully covered by governance-bridge
     ▼
-Phase 3: Pathway Pilot (Knowledge Plane)
+Phase 2.5: Harness Formalization (bot-config-api)  ─────────────── parallel from Phase 2
+    │  gate: route policy registry spec approved;
+    │        tool binding schema approved;
+    │        Phase 3+ unblocked
+    ▼
+Phase 3: Knowledge Ingestion Pilot  (Pathway preferred; mixed-arch under discussion)
     │  gate: nDCG@5 ≥ 0.90 on pilot scope, freshness lag confirmed
     ▼
-Phase 4: Pathway Primary + Multi-Source
+Phase 4: Knowledge Ingestion Primary + Multi-Source
     │  gate: all scopes migrated, nDCG@5 ≥ 0.925, freshness SLO met
     ▼
 Phase 5: Retrieval Quality Upgrades  (conditional — evidence-gated)
@@ -45,10 +51,10 @@ Phase 6: Observability + SLO Enforcement  (parallel from Phase 3)
 Phase 7: Production Cutover + Rollback Verification
     │  gate: legacy ingest frozen, rollback drill passed
     ▼
-  RAG_ARCHITECTURE_DOC_READY
+  HARNESS_AND_RAG_ARCHITECTURE_DOC_READY
 ```
 
-Phases 1 and 2 can run in parallel. Phase 6 can start alongside Phase 3.
+Phases 1 and 2 can run in parallel. Phase 2.5 can start alongside Phase 2. Phase 6 can start alongside Phase 3.
 
 ---
 
@@ -99,18 +105,30 @@ Measure what fraction of queries from each family are correctly routed to the ap
 
 **Owner**: Gateway/protocol team
 
-### P0.4 — Architecture approval
+### P0.4 — Architecture approval (RAG + Harness)
 
-The architecture documents in `docs/rag/` must be reviewed and approved by the CTO before Phase 1 implementation begins. This ensures the query family model, plane separation, and phase structure are correct before code is written.
+The architecture documents in `docs/rag/` must be reviewed and approved before Phase 1 implementation begins. This includes:
+- Query family model and plane separation (`architecture.md`)
+- Harness architecture: bot-config-api ownership split, open questions resolution (`harness-control-plane.md`)
+- Phase structure and knowledge-plane component preference (`implementation-plan.md`, `README.md`)
 
-**Deliverable**: Architecture approved (GitHub PR to `docs/rag/` merged, or explicit sign-off recorded in `docs/rag/decision-log.md`).
+**Harness open questions that must be answered at P0.4 gate:**
+1. Route policy format: per-bot declaration schema (Helm values object, Postgres table, or K8s CRD)
+2. Tool registry minimum viable schema
+3. Intent router ownership split: which elements live in gateway vs in bot-config-api config
+4. Whether Option B (bot-config-api expands) or Option C (harness/governance split) is the target direction
+
+These are recorded in `harness-control-plane.md` Section 9. P0.4 requires answers, not implementation.
+
+**Deliverable**: Architecture approved (PR to `docs/rag/` merged, open questions answered in `harness-control-plane.md` or a linked ADR).
 
 ### P0 Exit Gate
 
 - [ ] Retrieval baseline snapshotted and committed
 - [ ] Freshness baseline documented
 - [ ] Route correctness baseline per family documented
-- [ ] Architecture review complete
+- [ ] Architecture review complete (RAG + harness)
+- [ ] Harness open questions answered and recorded
 
 ---
 
@@ -258,9 +276,60 @@ Verify that the gateway assembles the final context correctly per query family:
 
 ---
 
-## Phase 3: Pathway Pilot (Knowledge Plane)
+## Phase 2.5: Harness Formalization (bot-config-api)
 
-**Purpose**: Prove that Pathway can ingest into Qdrant correctly, maintain chunk quality, and propagate deletes — on a single scope in the dev environment.
+**Purpose**: Formalize bot-config-api as the harness control plane authority. This phase designs and documents the schemas for route policy and tool registry — it does not require full implementation, but the schemas must be approved before Phase 3+ deployment work begins, because Phase 3 introduces new components (Pathway/ingest pipeline) that need to be represented in the control plane.
+
+**Parallel with**: Phase 2 (can start once P0.4 harness open questions are answered). Does not block Phase 3 start if schema approval is fast.
+
+**Current state**: bot-config-api owns provisioning, governance policy, and role registry. Route policy is hardcoded in `configmap-config.yaml`. Tool bindings are implicit `ALL_TOOLS` code constants. Session lifecycle is not tracked. Ref: `harness-control-plane.md`, Section 4.
+
+### P2.5.1 — Route policy schema design
+
+Define the per-bot route policy schema. Minimum required fields:
+- Per query family: primary plugin handler, suppressed plugins, fallback behavior
+- Confidence threshold for `unknown_route` assignment
+- Version field (route policy must be versionable)
+
+Decision required: storage format (Helm values object, Postgres table, or K8s ConfigMap). The format must allow gateway to read the policy at bot startup without an additional runtime API call.
+
+**Deliverable**: Route policy schema documented and approved. Not yet implemented in code.
+
+### P2.5.2 — Tool binding schema design
+
+Define the per-bot tool binding schema. Must represent:
+- Which tool categories are enabled for this bot (governance, MCP, relay, wf)
+- Per-tool: which roles may invoke it (orchestrator / reviewer / worker / any)
+- Whether a tool is enabled or disabled (distinct from role authorization)
+
+Decision required: whether this replaces or wraps the current `ALL_TOOLS` role-check model.
+
+**Deliverable**: Tool binding schema documented and approved. Not yet implemented.
+
+### P2.5.3 — bot-config-api evolution decision
+
+Record the explicit decision on which harness evolution option is adopted:
+- **Option B**: bot-config-api expands to own route policy, tool registry, and session lifecycle metadata
+- **Option C**: future harness/governance split (record trigger conditions only)
+
+This decision must be recorded in `harness-control-plane.md` or a linked ADR before Phase 3 work starts.
+
+**Deliverable**: Decision recorded. Harness open questions from `harness-control-plane.md` Section 9 answered.
+
+### P2.5 Exit Gate
+
+- [ ] Route policy schema approved
+- [ ] Tool binding schema approved
+- [ ] Harness evolution option (B or C) decided and recorded
+- [ ] P0.4 harness open questions answered (intent router ownership, session lifecycle, eval policy)
+
+---
+
+## Phase 3: Knowledge Ingestion Pilot
+
+**Component assumption**: Phases 3–7 are written with Pathway as the current preferred ingest component (see `README.md` candidate evaluation). The final component choice is confirmed at the P0.4 architecture review gate. If the mixed-architecture analysis or P2.5 harness schema work changes the recommendation, these phases will be updated.
+
+**Purpose**: Prove that the chosen ingest component can write into Qdrant correctly, maintain chunk quality, and propagate deletes — on a single scope in the dev environment.
 
 **Scope**: One knowledge scope (`{client_id}/api-docs`) on dev. S3 connector only.
 
