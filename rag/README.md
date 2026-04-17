@@ -34,25 +34,26 @@ Two independent flows run concurrently. **Solid arrows** = real-time query/respo
 
 ```mermaid
 flowchart TD
-    USER([User Query])
+    USER_REQ([User Request])
 
     subgraph CP["Control Plane — Gateway"]
         IR{"Intent Router\nclassify query_family"}
     end
 
-    USER --> IR
+    USER_REQ --> IR
 
     IR -->|"operational_state\nplanning_readiness"| GB
     IR -->|"knowledge_query"| KR
     IR -->|"memory_query"| MA
-    IR -->|"runtime_meta · general_chat\nunknown_route"| DIRECT["No retrieval\nLLM general context"]
+    IR -->|"runtime_meta · general_chat\nunknown_route"| DIRECT["No retrieval\n(system prompt / general context)"]
 
     subgraph OSP["Operational State Plane"]
         GB[governance-bridge]
         TEMP[(Temporal)]
         GH[(GitHub API)]
         K8S[(K8s API)]
-        GB --> TEMP & GH & K8S
+        BCA[(bot-config-api)]
+        GB --> TEMP & GH & K8S & BCA
     end
 
     subgraph KNO["Knowledge Plane"]
@@ -68,11 +69,14 @@ flowchart TD
         MA --> QDM & NEO
     end
 
-    GB --> RESP
-    QDK --> RESP
-    QDM & NEO --> RESP
-    DIRECT --> RESP
-    RESP([Response to User]) --> USER
+    GB -->|"tool results / context"| CTX
+    QDK -->|"retrieved documents"| CTX
+    QDM & NEO -->|"memory facts"| CTX
+    DIRECT -->|"no context"| CTX
+
+    CTX["Context Assembly"]
+    CTX --> LLM["LLM / Answer Composer"]
+    LLM --> USER_RESP([User Response])
 
     subgraph PIPE["Knowledge Ingestion — Pathway Pipeline  ·  async · continuous"]
         SRC["Source Systems\nS3 · GitHub · Confluence · Drive"]
@@ -87,15 +91,17 @@ flowchart TD
 
 | Path | What it represents |
 |---|---|
-| User → Intent Router → plane → Response | Real-time query routing. Every query is classified into a family and directed to exactly one plane's source of truth. |
-| `unknown_route` → No retrieval | Queries that cannot be classified with sufficient confidence. No plane is queried. LLM responds from general context only. |
+| User Request → Intent Router → plane → Context Assembly → LLM → User Response | Real-time query routing. Every query is classified into a family and directed to the primary source for that family. Source returns context or tool results — not a final answer. The LLM composes the final response. |
+| `unknown_route` → No retrieval → Context Assembly → LLM | Queries that cannot be classified with sufficient confidence. No plane is queried. LLM responds from general context only. |
 | Source Systems → Pathway → Qdrant (dotted) | Async knowledge ingestion. Runs continuously in the background. Independent of query routing. |
+
+**Backing stores are context providers, not answer emitters.** Governance tools, Qdrant collections, and memory stores return tool results or retrieved documents to Context Assembly. The LLM / Answer Composer holds the final response authority. Raw tool output never reaches the user directly.
 
 ---
 
 ## Query Family Model
 
-Every query a bot receives belongs to one of six families. The correct behavior — which plane to query, which source of truth to trust, what to do if that source is unavailable — is defined per family. **The architecture must be correct for all families, not optimized for a specific example query.**
+Every query a bot receives belongs to one of six families. The correct behavior — which plane to query as the primary source, which source of truth to trust, what to do if that source is unavailable — is defined per family. **The architecture must be correct for all families, not optimized for a specific example query.**
 
 | Family | Description | Source of Truth | Allowed Planes | Disallowed Planes | Fallback |
 |---|---|---|---|---|---|

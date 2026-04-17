@@ -54,25 +54,26 @@ The table below describes the target routing behavior after Phase 1 implementati
 
 ```mermaid
 flowchart TD
-    USER([User Query])
+    USER_REQ([User Request])
 
     subgraph CP["Control Plane — Gateway"]
         IR{"Intent Router\nclassify query_family"}
     end
 
-    USER --> IR
+    USER_REQ --> IR
 
     IR -->|"operational_state\nplanning_readiness"| GB
     IR -->|"knowledge_query"| KR
     IR -->|"memory_query"| MA
-    IR -->|"runtime_meta · general_chat\nunknown_route"| DIRECT["No retrieval\nLLM general context"]
+    IR -->|"runtime_meta · general_chat\nunknown_route"| DIRECT["No retrieval\n(system prompt / general context)"]
 
     subgraph OSP["Operational State Plane"]
         GB[governance-bridge]
         TEMP[(Temporal)]
         GH[(GitHub API)]
         K8S[(K8s API)]
-        GB --> TEMP & GH & K8S
+        BCA[(bot-config-api)]
+        GB --> TEMP & GH & K8S & BCA
     end
 
     subgraph KNO["Knowledge Plane"]
@@ -88,11 +89,14 @@ flowchart TD
         MA --> QDM & NEO
     end
 
-    GB --> RESP
-    QDK --> RESP
-    QDM & NEO --> RESP
-    DIRECT --> RESP
-    RESP([Response to User]) --> USER
+    GB -->|"tool results / context"| CTX
+    QDK -->|"retrieved documents"| CTX
+    QDM & NEO -->|"memory facts"| CTX
+    DIRECT -->|"no context"| CTX
+
+    CTX["Context Assembly"]
+    CTX --> LLM["LLM / Answer Composer"]
+    LLM --> USER_RESP([User Response])
 
     subgraph PIPE["Knowledge Ingestion — Pathway Pipeline  ·  async · continuous"]
         SRC["Source Systems\nS3 · GitHub · Confluence · Drive"]
@@ -103,7 +107,9 @@ flowchart TD
     PW -.->|"upsert / delete\n≤ 2 min lag target"| QDK
 ```
 
-**Isolation invariant**: A query routed to one plane must not trigger retrieval from another plane. The Operational State Plane does not index documents into Qdrant. The Knowledge Plane does not serve live system state. The Memory Plane does not receive Pathway-managed documents.
+**Isolation invariant**: A query routed to a plane must not trigger retrieval from another plane. The Operational State Plane does not index documents into Qdrant. The Knowledge Plane does not serve live system state. The Memory Plane does not receive Pathway-managed documents.
+
+**Execution model**: Each plane returns context or tool results to Context Assembly — not a final answer. The LLM / Answer Composer holds the final response authority. Raw backing-store output never reaches the user directly.
 
 ---
 
