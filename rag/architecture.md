@@ -196,11 +196,11 @@ Answers questions about live system state: what is currently deployed, running, 
 
 **Grounding rule**: bots must not fabricate answers about live state. If the governance-bridge tools are unavailable or return no result, the bot must acknowledge the limitation — not infer state from the Knowledge Plane.
 
-### 3.3 Knowledge Plane — Pathway + Qdrant
+### 3.3 Knowledge Plane — Target Architecture
 
 Serves authoritative, versioned domain knowledge: client product documentation, API references, policies, runbooks, and curated guides.
 
-**Pathway** is the knowledge data plane. Its role:
+**Pathway** is the current preferred candidate for the knowledge data plane. A mixed-architecture remains under discussion — see the candidate evaluation in README.md. Pathway's responsibilities in the current preferred design:
 - Continuous connector polling from source systems (S3, GitHub, Google Drive, Confluence — connector availability requires verification per source)
 - Change detection via differential dataflow: inserts, updates, and deletes are native stream events
 - Document processing: normalization, chunking, embedding
@@ -212,7 +212,7 @@ Serves authoritative, versioned domain knowledge: client product documentation, 
 - Scope-filtered search: `scope IN [resolved_scopes] AND status = "active"`
 - Collection-per-scope isolation: collection name `kb-{sha256_hex[:16]}` of `{client_id}/{scope_name}`
 
-**Why Pathway does not replace Qdrant for serving**: Pathway's DocumentStore REST API is suitable for freshness metadata queries and development use. Qdrant's HNSW index, payload filtering, and collection isolation are required for Agentopia's multi-tenant production serving. These are complementary layers.
+**Ingest component and serving layer are complementary**: Whatever ingestion component is selected, Qdrant's HNSW index, payload filtering, and collection isolation are required for Agentopia's multi-tenant production serving and are not in scope for replacement. These are independent layers that must not be collapsed.
 
 **Public reference**: Pathway, "Using Pathway as a Data Pipeline," https://pathway.com/developers/user-guide/introduction/streaming-and-static-modes
 

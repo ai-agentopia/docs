@@ -10,8 +10,10 @@ status: "ACTIVE"
 1. **Measure first** — every phase starts with a baseline and ends with a gate measurement. No phase ships without eval evidence.
 2. **Two parallel workstreams** — control-plane routing and knowledge-plane streaming are independent. Phase ordering is driven by risk and dependency, not by which workstream is more interesting.
 3. **Current state is the starting point** — where current behavior differs from target behavior, that difference is explicitly called out and becomes implementation work.
-4. **Single publisher per scope** — once a Qdrant scope is assigned to Pathway, only Pathway writes to it. No dual-write.
+4. **Single publisher per scope** — once a Qdrant scope is assigned to the chosen ingest component, only that component writes to it. No dual-write.
 5. **ArgoCD for all deployments** — no manual helm installs. Every new component goes through a Helm chart in `agentopia-infra`.
+
+> **Knowledge data plane component status**: Phases 3–7 of this plan are written with Pathway as the current preferred ingest component. This reflects the candidate evaluation outcome at the time of writing. **The final component choice is confirmed at the P0 architecture review gate** — if the mixed-architecture analysis or P3 pilot results change the recommendation, Phases 3–7 will be updated accordingly. The control-plane phases (1–2) are independent of this choice.
 
 ---
 

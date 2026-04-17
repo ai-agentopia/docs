@@ -6,13 +6,15 @@ decision-date: "2026-04-16"
 
 # Agentopia RAG Initiative
 
-## Locked Direction
+## Initiative Direction
 
 > **This initiative has two independent workstreams:**
 > 1. **Control-plane hardening** — formal intent routing so every query family reaches the correct source of truth
-> 2. **Knowledge-plane streaming** — Pathway as the knowledge ingestion and freshness layer, Qdrant as the serving layer
+> 2. **Knowledge-plane streaming** — automated ingestion and freshness pipeline for the knowledge plane, with Qdrant as the serving layer
 >
-> These are additive. Pathway owns the knowledge data plane. It does not own the whole agent architecture.
+> These are additive. The control plane and knowledge data plane concerns must not collapse into each other.
+>
+> **Knowledge data plane recommendation status**: Pathway is the current preferred candidate for the knowledge ingestion layer. A mixed-architecture approach — combining multiple open-source components with Agentopia-owned routing and source-of-truth policy — remains under active discussion. The final component selection is not locked until the architecture review and P3 pilot results are complete.
 
 ---
 
@@ -197,14 +199,32 @@ Separately, knowledge freshness is bounded by operator response time. No source 
 
 Both gaps require implementation work. Neither is a quick fix.
 
-### Candidate evaluation summary (knowledge-plane ingest only)
+### Candidate evaluation (knowledge-plane ingest)
 
-Five ingest frameworks were evaluated against: native delete semantics, streaming freshness, Qdrant compatibility, deployment weight, OSS licensing.
+Candidates are evaluated primarily on **architecture fit** and **business fit**. Deployment and operational cost are secondary tradeoffs, noted where relevant but not used as primary rejection criteria.
 
-| Candidate | Decision | Reason |
+**Evaluation criteria (in priority order):**
+1. **Architecture fit** — native insert/update/delete semantics; streaming freshness; compatible with Agentopia's existing Qdrant serving layer without requiring architecture collapse
+2. **Business fit** — fits Agentopia's service boundary model (control plane separated from data plane); required source connector support; OSS licensing
+3. **Extensibility** — incremental adoption path into existing service boundaries; observable and evaluable
+4. **Deployment cost** — secondary tradeoff; noted but not determinative
+
+| Candidate | Fit Assessment | Primary Reasoning |
 |---|---|---|
-| **Pathway** | **Selected** | Streaming-first differential dataflow with native insert/update/delete event semantics; lightweight deployment; 350+ connectors documented; OSS (BSL-1.1 core, Apache connectors). Connector availability for all required sources (GitHub, Google Drive, OneDrive) requires verification against current Pathway connector registry before implementation. |
-| Onyx | Not selected | Onyx is a full-stack retrieval platform. Its ingest and retrieval layers are tightly coupled. Using Onyx as an ingest-only component while retaining Qdrant as the serving layer is not a documented configuration. |
-| LlamaIndex IngestionPipeline | Not selected | Hash-based deduplication only. No delete propagation semantics. No continuous streaming; pipeline must be triggered externally. |
-| Haystack DocumentWriter | Not selected | Explicit delete API but no connector automation or scheduling. Would require wrapping with a polling orchestrator — rebuilding what Pathway provides natively. |
-| RAGFlow | Not selected | Minimum 4 CPU, 16GB RAM deployment. Opinionated full-stack pipeline incompatible with existing service boundaries between knowledge-ingest and super-rag. |
+| **Pathway** | **Current preferred direction** | Streaming-first differential dataflow with native insert/update/delete event semantics. Architecture fit: operates as a dedicated data-plane component that writes into Qdrant, preserving Agentopia's existing serving layer and service boundaries. Business fit: 350+ documented connectors; BSL-1.1 core / Apache connectors. Connector availability for GitHub, Google Drive, OneDrive requires verification against the current Pathway registry before P3 implementation. |
+| Onyx | Architecture fit weak | Full-stack retrieval platform whose ingest and retrieval layers are tightly coupled. Using Onyx as an ingest-only component while retaining Qdrant as the serving layer is not a supported or documented configuration. Fits a different system shape than Agentopia — one where retrieval and serving are co-owned by the same platform. |
+| LlamaIndex IngestionPipeline | Capability gap | Hash-based deduplication only. No delete propagation semantics. No continuous streaming — pipeline must be triggered externally. Does not satisfy the freshness or delete-propagation requirements without building a separate polling and scheduling wrapper around it. |
+| Haystack DocumentWriter | Capability gap | Explicit delete API available, but no connector automation or scheduling. Would require wrapping with a polling orchestrator — rebuilding what Pathway provides natively. Better suited as a lower-level building block in a custom pipeline than as a standalone ingest solution. |
+| RAGFlow | Architecture fit weak | Opinionated all-in-one retrieval platform designed for co-located ingest, retrieval, and serving. Agentopia requires explicit separation between the control plane, operational state plane, and knowledge plane — RAGFlow's architecture does not map clearly to this boundary model. Incremental adoption into Agentopia's existing service layout is not a documented path. Secondary: heavier deployment footprint than a purpose-built pipeline component. |
+
+### Mixed-architecture position
+
+The evaluation above compares candidates as standalone ingest solutions. The final architecture may adopt a **mixed approach** — combining multiple open-source components with Agentopia owning the control plane and source-of-truth policy:
+
+- **Ingestion / freshness component** — handles source watching, change detection, insert/update/delete propagation (Pathway is the current preferred candidate; lighter alternatives are not ruled out)
+- **Retrieval / index-serving component** — Qdrant (current, unchanged); HNSW index, scope filtering, collection isolation
+- **Control plane** — Agentopia-owned gateway plugin chain; query family classification, routing policy, source-of-truth enforcement
+
+A solution using Pathway for ingestion and Qdrant for serving is already a mixed architecture. The open question is whether further decomposition (e.g. a lighter ingestion library with a custom polling scheduler) better satisfies business requirements than Pathway's full pipeline model.
+
+**Component selection is not final.** The preferred direction will be confirmed after the P0.1 connector availability audit (Pathway registry verification) and P3 pilot results.
