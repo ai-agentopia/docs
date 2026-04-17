@@ -28,6 +28,71 @@ Pathway addresses Gap 2. A formalized intent router addresses Gap 1. Both must b
 
 ---
 
+## System Overview
+
+Two independent flows run concurrently. **Solid arrows** = real-time query/response path. **Dotted arrows** = async background data pipeline.
+
+```mermaid
+flowchart TD
+    USER([User Query])
+
+    subgraph CP["Control Plane — Gateway"]
+        IR{"Intent Router\nclassify query_family"}
+    end
+
+    USER --> IR
+
+    IR -->|"operational_state\nplanning_readiness"| GB
+    IR -->|"knowledge_query"| KR
+    IR -->|"memory_query"| MA
+    IR -->|"runtime_meta · general_chat\nunknown_route"| DIRECT["No retrieval\nLLM general context"]
+
+    subgraph OSP["Operational State Plane"]
+        GB[governance-bridge]
+        TEMP[(Temporal)]
+        GH[(GitHub API)]
+        K8S[(K8s API)]
+        GB --> TEMP & GH & K8S
+    end
+
+    subgraph KNO["Knowledge Plane"]
+        KR[knowledge-retrieval]
+        QDK[(Qdrant\nkb-scope collections)]
+        KR --> QDK
+    end
+
+    subgraph MEM["Memory Plane"]
+        MA[mem0-api]
+        QDM[(Qdrant\nmemory)]
+        NEO[(Neo4j)]
+        MA --> QDM & NEO
+    end
+
+    GB --> RESP
+    QDK --> RESP
+    QDM & NEO --> RESP
+    DIRECT --> RESP
+    RESP([Response to User]) --> USER
+
+    subgraph PIPE["Knowledge Ingestion — Pathway Pipeline  ·  async · continuous"]
+        SRC["Source Systems\nS3 · GitHub · Confluence · Drive"]
+        PW["Pathway — differential dataflow\ninsert · update · delete events"]
+        SRC -->|streaming events| PW
+    end
+
+    PW -.->|"upsert / delete\n≤ 2 min lag target"| QDK
+```
+
+**Reading the diagram:**
+
+| Path | What it represents |
+|---|---|
+| User → Intent Router → plane → Response | Real-time query routing. Every query is classified into a family and directed to exactly one plane's source of truth. |
+| `unknown_route` → No retrieval | Queries that cannot be classified with sufficient confidence. No plane is queried. LLM responds from general context only. |
+| Source Systems → Pathway → Qdrant (dotted) | Async knowledge ingestion. Runs continuously in the background. Independent of query routing. |
+
+---
+
 ## Query Family Model
 
 Every query a bot receives belongs to one of six families. The correct behavior — which plane to query, which source of truth to trust, what to do if that source is unavailable — is defined per family. **The architecture must be correct for all families, not optimized for a specific example query.**

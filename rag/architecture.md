@@ -50,53 +50,57 @@ The table below describes the target routing behavior after Phase 1 implementati
 
 ## 2. Four-Plane Architecture
 
+### Query Routing Flow
+
 ```mermaid
-graph TD
-    subgraph User
-        Q[User Query]
+flowchart TD
+    USER([User Query])
+
+    subgraph CP["Control Plane — Gateway"]
+        IR{"Intent Router\nclassify query_family"}
     end
 
-    subgraph CP["Control Plane (Gateway)"]
-        IR[Intent Router<br/>classify → query family]
-        GB[governance-bridge<br/>operational_state · planning_readiness]
-        KR[knowledge-retrieval<br/>knowledge_query]
-        MA[mem0-api<br/>memory_query]
-        SC[System Prompt<br/>runtime_meta · general_chat]
-    end
+    USER --> IR
+
+    IR -->|"operational_state\nplanning_readiness"| GB
+    IR -->|"knowledge_query"| KR
+    IR -->|"memory_query"| MA
+    IR -->|"runtime_meta · general_chat\nunknown_route"| DIRECT["No retrieval\nLLM general context"]
 
     subgraph OSP["Operational State Plane"]
-        TEMP[Temporal<br/>workflow history]
-        K8S[K8s API<br/>bot config CRDs]
-        GH[GitHub API<br/>issues · milestones]
+        GB[governance-bridge]
+        TEMP[(Temporal)]
+        GH[(GitHub API)]
+        K8S[(K8s API)]
+        GB --> TEMP & GH & K8S
     end
 
-    subgraph KP["Knowledge Plane"]
-        PW[Pathway Pipeline<br/>streaming differential dataflow]
-        QDK[Qdrant<br/>kb-scope collections]
-        SOURCES[Source Systems<br/>S3 · GitHub · Confluence · Drive]
-        SOURCES -->|continuous events| PW
-        PW -->|upsert / delete| QDK
+    subgraph KNO["Knowledge Plane"]
+        KR[knowledge-retrieval]
+        QDK[(Qdrant\nkb-scope collections)]
+        KR --> QDK
     end
 
-    subgraph MP["Memory Plane"]
-        MEM0[mem0-api]
-        QDM[Qdrant<br/>agentopia_memory]
-        NEO[Neo4j<br/>entity graph]
-        MEM0 --> QDM
-        MEM0 --> NEO
+    subgraph MEM["Memory Plane"]
+        MA[mem0-api]
+        QDM[(Qdrant\nmemory)]
+        NEO[(Neo4j)]
+        MA --> QDM & NEO
     end
 
-    Q --> IR
-    IR -->|operational_state<br/>planning_readiness| GB
-    IR -->|knowledge_query| KR
-    IR -->|memory_query| MA
-    IR -->|runtime_meta<br/>general_chat| SC
+    GB --> RESP
+    QDK --> RESP
+    QDM & NEO --> RESP
+    DIRECT --> RESP
+    RESP([Response to User]) --> USER
 
-    GB --> TEMP
-    GB --> K8S
-    GB --> GH
-    KR --> QDK
-    MA --> MEM0
+    subgraph PIPE["Knowledge Ingestion — Pathway Pipeline  ·  async · continuous"]
+        SRC["Source Systems\nS3 · GitHub · Confluence · Drive"]
+        PW["Pathway — differential dataflow\ninsert · update · delete events"]
+        SRC -->|streaming events| PW
+    end
+
+    PW -.->|"upsert / delete\n≤ 2 min lag target"| QDK
 ```
 
 **Isolation invariant**: A query routed to one plane must not trigger retrieval from another plane. The Operational State Plane does not index documents into Qdrant. The Knowledge Plane does not serve live system state. The Memory Plane does not receive Pathway-managed documents.
