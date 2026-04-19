@@ -1,0 +1,122 @@
+name: Sync architecture docs to RAG S3
+
+# GitHub → S3 sync for the Agentopia knowledge base (RAG platform issue #26).
+#
+# WHAT this covers: file content (.md only, for now) under architecture/
+# pushed to main. Those files land in s3://utop-oddspark-document/architecture/
+# which is the exact prefix the Pathway pipeline polls; Pathway then parses,
+# chunks, embeds, and upserts them into Qdrant collection kb-45294aa854667d3b
+# under scope "utop/oddspark".
+#
+# WHAT this does NOT cover: GitHub issues / PRs / commits / reviews. That
+# structured-record ingestion lives under rag-platform issue #27 (Airbyte
+# GitHub connector) and is intentionally out of scope for this workflow.
+#
+# Binary formats (.docx, .pdf) are also out of scope until the pipeline gains
+# format="binary" + UnstructuredParser support.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'architecture/**/*.md'
+      - '.github/workflows/sync-architecture-to-s3.yml'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview only — do not mutate S3'
+        type: boolean
+        default: false
+
+concurrency:
+  group: rag-architecture-sync
+  # Serialize — we must never race two sync runs against the same prefix.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BUCKET: utop-oddspark-document
+  REGION: ap-northeast-1
+  SOURCE_DIR: architecture
+  S3_PREFIX: architecture
+  SCOPE_IDENTITY: utop/oddspark
+
+jobs:
+  sync:
+    name: aws s3 sync architecture/ → s3://${BUCKET}/${S3_PREFIX}/
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.REGION }}
+
+      - name: Validate source layout
+        run: |
+          if [ ! -d "${SOURCE_DIR}" ]; then
+            echo "::error::Expected ${SOURCE_DIR}/ to exist at repository root."
+            exit 1
+          fi
+          count=$(find "${SOURCE_DIR}" -type f -name '*.md' | wc -l | tr -d ' ')
+          echo "Markdown files in ${SOURCE_DIR}/: ${count}"
+          if [ "${count}" -eq 0 ]; then
+            echo "::error::No markdown files found — refusing to run a full-prefix delete."
+            exit 1
+          fi
+          nonmd=$(find "${SOURCE_DIR}" -type f ! -name '*.md' -print)
+          if [ -n "${nonmd}" ]; then
+            echo "::warning::Non-markdown files present under ${SOURCE_DIR}/ (they will NOT be synced):"
+            echo "${nonmd}"
+          fi
+
+      - name: Preview sync (dryrun)
+        run: |
+          set -o pipefail
+          aws s3 sync "${SOURCE_DIR}/" "s3://${BUCKET}/${S3_PREFIX}/" \
+            --region "${REGION}" \
+            --delete \
+            --exclude '*' \
+            --include '*.md' \
+            --exact-timestamps \
+            --dryrun | tee /tmp/sync-plan.txt
+
+      - name: Apply sync
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true' }}
+        run: |
+          aws s3 sync "${SOURCE_DIR}/" "s3://${BUCKET}/${S3_PREFIX}/" \
+            --region "${REGION}" \
+            --delete \
+            --exclude '*' \
+            --include '*.md' \
+            --exact-timestamps
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### GitHub → S3 sync"
+            echo ""
+            echo "| Setting | Value |"
+            echo "|---|---|"
+            echo "| Bucket | \`${BUCKET}\` |"
+            echo "| Region | \`${REGION}\` |"
+            echo "| Source | \`${SOURCE_DIR}/\` |"
+            echo "| Prefix | \`${S3_PREFIX}/\` |"
+            echo "| Scope | \`${SCOPE_IDENTITY}\` |"
+            echo "| Trigger | \`${{ github.event_name }}\` |"
+            echo "| Dry-run | \`${{ github.event.inputs.dry_run || 'false' }}\` |"
+            echo ""
+            echo "#### Plan"
+            echo '```'
+            cat /tmp/sync-plan.txt 2>/dev/null || echo '(no plan captured)'
+            echo '```'
+            echo ""
+            echo "Pathway polls this prefix every 30 s — indexing typically visible in Qdrant within 1–2 poll cycles after the run completes."
+          } >> "$GITHUB_STEP_SUMMARY"
