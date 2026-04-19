@@ -79,23 +79,33 @@ jobs:
       - name: Preview sync (dryrun)
         run: |
           set -o pipefail
+          # `aws s3 sync` default comparison is size + local-mtime >= S3-mtime.
+          # `actions/checkout` rewrites file mtimes on every run, so every
+          # local file is always "newer" than S3 — this forces content
+          # comparison via size to skip unchanged files. Using
+          # `--exact-timestamps` would force a re-upload of every file on
+          # every run because checkout mtimes never match S3.
           aws s3 sync "${SOURCE_DIR}/" "s3://${BUCKET}/${S3_PREFIX}/" \
             --region "${REGION}" \
             --delete \
             --exclude '*' \
             --include '*.md' \
-            --exact-timestamps \
+            --size-only \
             --dryrun | tee /tmp/sync-plan.txt
 
       - name: Apply sync
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true' }}
         run: |
+          # Same rationale: size-only avoids re-uploading every file on
+          # every push. Pathway re-ingests on actual S3 LastModified
+          # changes, so unchanged-content re-uploads just burn embedding
+          # API calls without improving correctness.
           aws s3 sync "${SOURCE_DIR}/" "s3://${BUCKET}/${S3_PREFIX}/" \
             --region "${REGION}" \
             --delete \
             --exclude '*' \
             --include '*.md' \
-            --exact-timestamps
+            --size-only
 
       - name: Job summary
         if: always()
