@@ -61,6 +61,12 @@
             ]
           },
           {
+            "group": "Runtime & Safety",
+            "pages": [
+              "architecture/runtime-facts-capability-classes-baseline"
+            ]
+          },
+          {
             "group": "Knowledge & Retrieval",
             "pages": [
               "architecture/super-rag-blueprint",
