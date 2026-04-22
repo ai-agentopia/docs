@@ -22,13 +22,13 @@ title: "HITL / Checkpoint Feasibility Debate"
 
 ## 1. Executive Summary
 
-Agentopia can support a production-quality Human-in-the-Loop / checkpoint system **without a greenfield runtime rewrite**, but the fit is not uniform across lanes and today's approval primitives are split across more than one subsystem. The deterministic lane already runs a production HITL pattern — Temporal signals + updates + `wait_condition` — inside `DeliveryWorkflow`, with a domain-rich operator decision set that exceeds the canonical {approve, reject, edit, escalate} taxonomy documented across primary sources. The A2A / relay lane already has a second production approval primitive at the thread layer — `ThreadStatus.pending_approval`, the `/api/v1/threads/{thread_id}/approve` endpoint, and an integration test covering checkpoint → pending → approve → resume. Approval and resume, therefore, are not missing on this platform; what is missing is a **unified** approval contract that covers all harnessed runs, plus an approval primitive at the autonomous tool-call boundary.
+Agentopia can support a production-quality Human-in-the-Loop / checkpoint system **without a greenfield runtime rewrite**, but the fit is not uniform across lanes and today's approval primitives are intentionally split across more than one subsystem. The deterministic lane already runs a production HITL pattern — Temporal signals + updates + `wait_condition` — inside `DeliveryWorkflow`, with a domain-rich operator decision set that exceeds the canonical {approve, reject, edit, escalate} taxonomy documented across primary sources. The A2A / relay lane already has a second production approval primitive at the thread layer — `ThreadStatus.pending_approval`, the `/api/v1/threads/{thread_id}/approve` endpoint, and an integration test covering checkpoint → pending → approve → resume. The workflow/control-plane layer also already exposes approval-style handoff at the work-item boundary via `POST /work-item/{packet_id}/approve`, which is the correct shape for user-story / milestone / downstream-packet approvals. Approval and resume, therefore, are not missing on this platform; what is missing is a **unified policy and decision contract** that spans these insertion points, plus a generic approval primitive at the autonomous tool-call boundary.
 
 At the autonomous tool-call boundary specifically, `before_tool_call` is already `async` and can `await` external calls — the hook is not synchronous. What it cannot do today is represent a pending-approval outcome, distinguish an operator edit from a plugin rewrite, report an escalation or a timeout explicitly, or survive a gateway restart while an approval is in flight: its result contract is `{params, block, blockReason}` and nothing persists behind the `await` except whatever the called service stores. The refactor required is therefore a **richer hook result contract plus durable state behind the wait** (Temporal Event History, per §7), not a sync→async retrofit.
 
-The verdict is therefore **feasible, lane-specific**. For the deterministic lane, generalising the `DeliveryWorkflow` template into a reusable "approval-sidecar workflow" primitive — owned by `bot-config-api` and invoked from any harness run that needs an approval gate — is a small, low-risk step that reuses what already works. For the autonomous lane, the cleanest v1 is to teach `before_tool_call` to **route sensitive tool calls to the same approval-sidecar workflow and `await` its update response with a bounded timeout**, falling back to a policy-defined default (deny or escalate) on timeout. For A2A / relay, the question is unification — three options are on the table in §13 — not basic implementation.
+The verdict is therefore **feasible, lane-specific**. Agentopia should treat HITL as a **shared policy layer with multiple insertion points**, not as one mandatory hop for every workflow. Workflow-level checkpoints stay where they already fit (Temporal workflow updates/signals and work-item approvals). Thread-level checkpoints stay where they already fit (A2A / relay thread pause-and-resume). The missing generic primitive is the autonomous tool-call boundary: for that lane, the cleanest v1 is to teach `before_tool_call` to **route sensitive tool calls to an approval-sidecar workflow and `await` its update response with a bounded timeout**, falling back to a policy-defined default (deny or escalate) on timeout. Unification is about shared policy semantics, decision schema, and operator experience — not about forcing every existing approval to migrate into one workflow type immediately.
 
-`admin_mutate` remains an Admin-class tool per the approved runtime-facts baseline. This document does not override that decision; it describes how `admin_mutate` invocations are also routed through the approval-sidecar workflow when the action class demands human approval. Deterministic admin-mutation ingress remains a debated alternative (deep-dive §10.4), not a baseline.
+`admin_mutate` remains an Admin-class tool per the approved runtime-facts baseline. This document does not override that decision; it describes how `admin_mutate` invocations are routed through the tool-boundary approval-sidecar when the action class demands human approval. Deterministic admin-mutation ingress remains a debated alternative (deep-dive §10.4), not a baseline.
 
 The canonical primary-source research closes out one debate cleanly: LangGraph's `interrupt()` and Temporal's Signals are **not competing primitives at the same layer**. LangGraph's interrupt is an application-level flow-control construct; Temporal's signal is a durability transport. Agentopia already owns durability via Temporal (delivery), so the HITL approach layers on top of that, not alongside. Adopting LangGraph as a parallel durability store is explicitly rejected.
 
@@ -140,10 +140,11 @@ This is a domain-specific instantiation of a generic pattern. `OperatorCommand` 
 - `GET /status/{workflow_id}` — `get_workflow_status`
 - `GET /projects/{workflow_id}/status/summary` — summary view
 - `POST /register-gate` — gate registration (precursor to a policy matrix)
+- `POST /work-item/{packet_id}/approve` — approve a work item and create downstream handoff with verified approver identity
 - `POST /evidence/artifact`, `POST /evidence/record`, `GET /evidence/work-item/{id}`, `GET /evidence/check-stale` — artifact/evidence handoff (relevant to HITL artifact flow in §9)
 - `POST /bind-actor`, `POST /register-role`, `GET /roles`, `GET /bindings`, etc. — actor identity + role binding
 
-The identity surface required by Temporal's signal-auth gap is therefore already present at the API layer: operator decisions land via HTTP, authenticated by the fronting service, and the `actor_id` is stamped into the signal/update payload.
+The identity surface required by Temporal's signal-auth gap is therefore already present at the API layer: operator decisions land via HTTP, authenticated by the fronting service, and the `actor_id` is stamped into the signal/update payload. This same surface is already capable of hosting story / milestone / downstream-packet approvals at the workflow/work-item boundary; HITL is not limited to a single tool-call interception point.
 
 ### 4.3 A2A / relay checkpoint pause-and-approve is already implemented and durable at the thread layer
 
@@ -223,9 +224,9 @@ Adopt `interrupt()` + LangGraph checkpointer. Rejected immediately:
 - Agentopia already uses LangGraph as a planner **inside** a Temporal activity; promoting it to the platform HITL layer inverts that correct layering.
 - Primary-source research (§3.8): LangGraph and Temporal are complementary at different layers, not alternatives. Adopting LangGraph HITL would mean abandoning Temporal durability for HITL specifically, then re-stitching two checkpointers.
 
-### Option 3 — Hybrid: Temporal sidecar + gateway-side sync block
+### Option 3 — Hybrid: preserve current workflow/thread checkpoints, add Temporal sidecar for generic tool approvals
 
-The deterministic lane uses Temporal signals/updates natively (as `DeliveryWorkflow` already does). The autonomous lane does **not** turn every tool call into a workflow; instead, `before_tool_call` routes sensitive action classes to a **short-lived approval-sidecar workflow** and blocks synchronously on the sidecar's update response with a bounded timeout. The sidecar workflow is the same generic shape across all harnessed runs: one Temporal workflow type, one update handler per decision, one shared state schema. The approval-sidecar is the single durable substrate; the gateway is just a client that awaits a bounded response.
+The deterministic lane keeps using Temporal signals/updates natively (as `DeliveryWorkflow` already does). The A2A / relay lane keeps using the existing thread-level `pending_approval` primitive. The workflow/work-item layer keeps using existing control-plane approval endpoints. The autonomous tool-call boundary does **not** turn every tool call into a workflow; instead, `before_tool_call` routes sensitive action classes to a **short-lived approval-sidecar workflow** and awaits the sidecar's update response with a bounded timeout. The sidecar workflow is the new generic primitive for approvals that do not already have a natural home in the current architecture. Unification happens at the policy-matrix, decision-schema, and operator-UI layers, not by collapsing all approvals into one execution hop.
 
 ### Option 4 — In-process approval only (no durability)
 
@@ -237,14 +238,20 @@ Approval lives entirely in the gateway process; if the gateway restarts, the pen
 |---|---|---|---|---|---|---|
 | 1 — Temporal-native everywhere | Temporal workflow per run | Excellent | Poor for specialist chat (overwraps) | High (wrap every run) | Distorts autonomous-lane model; heavy infra for small-latency turns | Reject as universal |
 | 2 — LangGraph-native everywhere | LangGraph checkpointer | Good | Poor (fragments durability) | High (replace or shim) | Two durability stores; resume-side-effect footgun | **Reject** |
-| 3 — Temporal sidecar + gateway sync block | Temporal sidecar workflow; gateway awaits update response | Excellent (Temporal) | Good for both lanes | Medium (gateway hook extension; sidecar workflow) | Sync-wait timeout semantics must be carefully specified | **Adopt** |
+| 3 — Hybrid: existing workflow/thread checkpoints + Temporal sidecar for tool approvals | Existing Temporal/work-item/thread primitives plus a Temporal sidecar workflow where no primitive exists today | Excellent | Best fit for current architecture | Medium (gateway hook extension; sidecar workflow; policy unification) | Requires clear policy semantics across multiple insertion points | **Adopt** |
 | 4 — In-process only | Gateway memory | None | Good | Low | Loses approvals on restart; fails audit | Reject |
 
 ## 7. Recommended HITL Architecture for Agentopia
 
-### 7.1 Single durable substrate
+### 7.1 Shared policy layer, lane-specific checkpoint primitives
 
-Temporal is the HITL durability substrate for both lanes. The deterministic lane uses Temporal natively (as `DeliveryWorkflow` does). The autonomous lane uses a shared **approval-sidecar workflow** that any harnessed run can invoke, synchronously from `before_tool_call` or asynchronously from A2A / subagent / ACP checkpoints.
+Agentopia should not force every approval through one hop. The current architecture already has three valid checkpoint insertion points, and the recommended design preserves them:
+
+- **Workflow / work-item boundary** — keep using existing control-plane + Temporal workflow approval shapes where the business object is already a workflow or packet.
+- **Thread boundary** — keep using the A2A / relay `pending_approval` thread primitive where the unit of review is an inter-agent thread epoch.
+- **Tool-call boundary** — add a generic approval-sidecar workflow only where the current architecture has no durable approval primitive yet: sensitive autonomous tool calls in the gateway run loop.
+
+Unification happens in the **policy matrix**, **decision schema**, **identity/audit rules**, and **operator experience**, not by replacing every existing approval substrate on day one.
 
 ### 7.2 Shape of the approval-sidecar workflow
 
@@ -256,13 +263,23 @@ Single Temporal workflow type, `ApprovalSidecarWorkflow`, owned by `bot-config-a
 - **Query handlers:** `get_status` for the operator UI and for the gateway to re-confirm on reconnect.
 - **Run loop:** a single `workflow.wait_condition(lambda: status != PENDING, timeout=timeout_seconds)` with a timeout that drives the `EXPIRED` transition and the `default_on_timeout` behaviour.
 
-This is a small workflow — maybe 150-200 lines by analogy with `DeliveryWorkflow` — but it is the generic HITL primitive for the platform.
+This is a small workflow — maybe 150-200 lines by analogy with `DeliveryWorkflow` — but it is the **generic tool-boundary HITL primitive**, not a mandate to replace current workflow-level or thread-level approvals immediately.
 
 ### 7.3 Deterministic lane
 
-Already works via Temporal signals/updates in the delivery workflow. The platform generalises `DeliveryWorkflow`'s operator decision pattern into a template that other deterministic workflows (future workflow cancel, approval transitions, non-chat admin ops) can reuse directly. No autonomous-lane concepts leak here.
+Already works via Temporal signals/updates in the delivery workflow. The platform generalises `DeliveryWorkflow`'s operator decision pattern into a template that other deterministic workflows and workflow-adjacent objects (workflow cancel, approval transitions, work-item approval / downstream handoff) can reuse directly. No autonomous-lane concepts leak here.
 
-### 7.4 Autonomous lane — `before_tool_call` routing
+### 7.4 Thread-level checkpointing
+
+Keep the existing A2A / relay thread checkpoint path for thread review:
+
+- `checkpoint` moves a thread to `pending_approval`
+- `/approve` resumes or rejects it
+- optional `guidance` lets the human steer the next turn
+
+This is already the right primitive when the review unit is "the thread should pause here and a human should decide whether to continue." It should not be reimplemented through the tool-call sidecar in v1. The unification requirement is shared semantics and operator visibility, not substrate replacement.
+
+### 7.5 Autonomous tool boundary — `before_tool_call` routing
 
 The gateway's `before_tool_call` hook gains a new branch for action classes whose policy requires human approval:
 
@@ -278,24 +295,27 @@ if policy.requires_approval(execution_class, action_class, tool_name):
     if status == EXPIRED: return apply_default_on_timeout(policy)
 ```
 
-The sync `await_sidecar_decision` is the one new runtime primitive. It is a bounded HTTP call from the gateway to `bot-config-api`, which in turn polls or long-polls the Temporal sidecar via Update. The gateway does not itself speak Temporal client protocol — it calls the control plane's HTTP layer. This preserves the existing ownership boundary (the gateway is not a Temporal client).
+The bounded `await_sidecar_decision` is the one new runtime primitive. It is a bounded HTTP call from the gateway to `bot-config-api`, which in turn polls or long-polls the Temporal sidecar via Update. The gateway does not itself speak Temporal client protocol — it calls the control plane's HTTP layer. This preserves the existing ownership boundary (the gateway is not a Temporal client).
 
-### 7.5 Long-running run reauthorization
+### 7.6 Long-running run reauthorization
 
 A harnessed run that exceeds a configured wall-clock budget triggers a reauthorization approval-sidecar (same shape, different action class: `reauthorize`). The caller (A2A checkpoint, subagent long-tail, ACP session) issues the same sidecar request; the decision flow is identical. Timeout default on reauthorization is `REJECTED` (fail-safe, not auto-continue).
 
-### 7.6 Architecture diagram
+### 7.7 Architecture diagram
 
 ```mermaid
 flowchart TD
     subgraph D["Deterministic lane"]
-        DW["DeliveryWorkflow / other Temporal workflows<br/>@workflow.signal + @workflow.update"]
+        DW["DeliveryWorkflow / work-item approvals<br/>@workflow.signal + @workflow.update + API approvals"]
     end
 
-    subgraph A["Autonomous lane"]
+    subgraph T["Thread lane"]
+        TH["A2A / relay threads<br/>checkpoint -> pending_approval -> approve"]
+    end
+
+    subgraph A["Autonomous tool lane"]
         RUN["Gateway run loop<br/>agentopia-core"]
-        BTC["before_tool_call hook<br/>sync branch"]
-        A2A["A2A / subagent / ACP<br/>checkpoint emitter"]
+        BTC["before_tool_call hook<br/>tool-boundary checkpoint branch"]
     end
 
     CP["bot-config-api control plane<br/>- approval policy matrix<br/>- operator endpoints<br/>- sidecar dispatcher"]
@@ -303,8 +323,8 @@ flowchart TD
 
     RUN --> BTC
     BTC -->|policy.requires_approval| CP
-    A2A --> CP
     DW --> CP
+    TH --> CP
     CP --> SW
     UI["Operator UI / inbox<br/>(in-house, Phase H3)"] --> CP
     SW -->|decision| CP
@@ -321,8 +341,10 @@ The v1 policy matrix, expressed in the control plane. Rows are action classes; c
 |---|---|---|---|---|---|
 | `consultation_read` | autonomous | **No** | — | Read-only; no artifact; R1/R2 caps handle abuse | None |
 | `audit_read` | autonomous | **No** | — | Read-only inspection; must remain fluid | None |
+| Work-item approval / downstream handoff | workflow / orchestrator | **Yes** where the packet transition is a control-plane milestone | approve / reject / edit / send_back | Story / milestone / downstream packet approval already has a natural workflow/work-item home | Existing `/work-item/{packet_id}/approve` + workflow handlers |
 | `execution_write` (delivery worker tools) | deterministic | Already gated by `workflow_dispatch` | workflow-native approval via `update_operator_approve`, `update_operator_send_back` | Delivery lane already owns this per p1 | Temporal workflow handlers (existing) |
 | `review_write` | deterministic | Already gated | `update_operator_approve`, `update_operator_retry_review` | Reviewer role + workflow context | Existing `DeliveryWorkflow` |
+| A2A / relay thread checkpoint | thread | **Yes** when a thread reaches review boundary / auto-checkpoint threshold | approve / reject / approve with guidance | Human reviews the thread epoch, not an individual tool call | Existing thread `/checkpoint` + `/approve` |
 | `admin_write` (`admin_mutate` tool actions) | autonomous (Admin class) | **Yes** | approve / reject / edit / escalate; **reason required for any destructive action** | Irreversible or high-impact per runtime-facts baseline §1.5 | Approval-sidecar workflow |
 | Cross-session `sessions_send` | autonomous (Orchestrator+) | **Yes** for first send to a new session; **No** for ongoing thread | approve / reject | Prevents accidental blast; threaded turns inherit approval | Approval-sidecar workflow, cached per thread |
 | `sessions_spawn` (new subagent) | autonomous (Orchestrator+) | **Yes** when the new subagent has an elevated capability class | approve / reject / escalate | Subagent elevation is a privilege boundary | Approval-sidecar workflow |
@@ -330,20 +352,22 @@ The v1 policy matrix, expressed in the control plane. Rows are action classes; c
 | Long-running run reauthorization | any autonomous | **Yes** on wall-clock exceedance | approve (extend budget) / reject (terminate) / escalate | Prevents silent runaway; fail-safe default is terminate | Approval-sidecar workflow |
 | Any write to shared state via MCP | autonomous | **Yes** if the MCP server is marked `writes_shared_state: true` | approve / reject / edit | MCP allowlist per bot declares this property | Approval-sidecar workflow |
 
-Policy lives in `bot-config-api` as config, not code. Additions to the matrix do not require a runtime change.
+Policy lives in `bot-config-api` as config, not code. Additions to the matrix do not require a runtime change, but they may map to different insertion points depending on the lane and object under review.
 
 ## 9. State, Persistence, and Resume Model
 
 ### 9.1 What is persisted, where
 
-- **Approval-sidecar state** (status, decision payload, actor, reason, timestamps) → Temporal Event History. Authoritative.
+- **Workflow-level approval state** (delivery/operator updates, workflow transitions) → existing Temporal Event History for those workflows. Authoritative for workflow-bound approvals.
+- **Thread-level approval state** (`pending_approval`, guidance, epoch summaries) → existing A2A thread state under shared-memory thread directories plus thread metadata. Authoritative for thread-bound approvals until/unless Phase S changes that.
+- **Approval-sidecar state** (status, decision payload, actor, reason, timestamps) → Temporal Event History. Authoritative for tool-boundary and generic sidecar-backed approvals.
 - **Approval matrix** (action class → requires_approval, allowed_decisions, timeout, default) → Postgres, owned by `bot-config-api`. Versioned.
 - **Per-run approval pointers** (for a given `run_id`, which approval_ids have fired) → Postgres `approvals` table, keyed by `run_id + tool_call_id`. Lets a reconnecting gateway recover pending state.
 - **Artifact attachments to an approval** (proposed patch, summary, evidence) → existing `/evidence/*` surface in `bot-config-api/routers/workflow.py` (Table A, §4.2).
 
 ### 9.2 Resume semantics
 
-If the gateway restarts mid-wait, it reconnects and **queries the approval_id's status** via the control plane (which queries Temporal). If still PENDING, the gateway re-awaits. If terminal, the gateway applies the recorded decision. Durability lives in Temporal Event History; the gateway is stateless with respect to approvals, which matches the current gateway design.
+If the gateway restarts mid-wait on a tool-boundary approval, it reconnects and **queries the approval_id's status** via the control plane (which queries Temporal). If still `PENDING`, the gateway re-awaits. If terminal, the gateway applies the recorded decision. Workflow-bound approvals and thread-bound approvals keep their existing resume semantics in their own layers. The shared contract is in the decision schema and policy matrix; substrate-specific resume remains lane-appropriate until a later consolidation is explicitly chosen.
 
 ### 9.3 Idempotency
 
@@ -353,19 +377,19 @@ Approval creation is idempotent on `(run_id, tool_call_id)`. Re-emitting the sam
 
 | Integration point | Change shape | Difficulty | Owner |
 |---|---|---|---|
-| `before_tool_call` new policy branch | Add a policy lookup + sidecar dispatch + bounded await | Medium — one new async-await primitive in a previously sync-only hook | `agentopia-core` |
+| `before_tool_call` new policy branch | Add a policy lookup + sidecar dispatch + bounded await plus richer hook result semantics | Medium — hook is already async; work is in contract extension + recovery semantics | `agentopia-core` |
 | Approval-sidecar workflow | New Temporal workflow type | Low — ~200 LoC by analogy with `DeliveryWorkflow` | `bot-config-api` |
 | Control-plane approval endpoints | Extend `routers/workflow.py` with `/approvals/*` | Low — pattern matches existing `/command`, `/status`, `/evidence` endpoints | `bot-config-api` |
 | Approval policy matrix | New config schema + Postgres table + CRUD in `bot-config-api` | Low | `bot-config-api` |
 | Operator approval UI | New UI page reading the control-plane endpoints; built on `agentopia-ui` | Medium | `agentopia-ui` |
-| A2A checkpoint integration | A2A `PENDING_APPROVAL` transitions publish an approval_id through the same sidecar path | Medium — depends on verification of A2A's current durability (see §13) | `agentopia-core` A2A code + `bot-config-api` |
+| A2A checkpoint integration | Decide whether A2A `PENDING_APPROVAL` stays authoritative, mirrors sidecar, or converges on shared sidecar semantics | Medium — design reconciliation of two working primitives, not basic durability verification | `agentopia-core` A2A code + `bot-config-api` |
 | Subagent / ACP integration | Parent's `before_tool_call` and run-contract checkpoints enforce; subagent itself is not a separate HITL participant in v1 | Low (policy-routed through parent) | `agentopia-core` |
 | Capability-class enforcement at tool boundary | Unchanged from the runtime-facts baseline; approval is an **additional** gate after class filtering | N/A — no change | Existing |
 
 ## 11. Gaps and Required Refactors
 
-1. **Richer hook result contract and durable suspend/resume behind the hook.** The `before_tool_call` hook is already `async` and can `await` external calls; the gap is the result contract. `PluginHookBeforeToolCallResult` exposes `{params, block, blockReason}` only. A production HITL model needs additional outcomes — pending-approval, edited (distinguishable from plugin-rewrite), escalated (with target role), expired (with timeout-default behaviour) — and a durable state behind any in-flight approval so that a gateway restart does not drop it. The durable state lives in Temporal (per §7); the hook's refactor is to represent these outcomes and to reconnect to an in-flight approval after a restart using the existing `toolCallId` / `runId` correlation ids.
-2. **A2A / relay unification into the generic HITL model.** A2A already has a working, durable pause-and-approve primitive at the thread layer (status `pending_approval`, `/approve` endpoint with guidance, integration test covering checkpoint → approve → resume). What is missing is unification into the platform-wide model proposed in §7 — a shared decision schema, a shared approval-policy matrix, and a single operator UI. The Phase S work in §14 chooses between (a) sidecar mirrors thread lifecycle, (b) A2A emits into sidecar as authoritative state, (c) two primitives as peers with shared schema+UI. A spike is warranted to pick the option, not to verify whether approval works today (it does).
+1. **Richer hook result contract and durable suspend/resume behind the tool boundary.** The `before_tool_call` hook is already `async` and can `await` external calls; the gap is the result contract. `PluginHookBeforeToolCallResult` exposes `{params, block, blockReason}` only. A production tool-boundary HITL model needs additional outcomes — pending-approval, edited (distinguishable from plugin-rewrite), escalated (with target role), expired (with timeout-default behaviour) — and a durable state behind any in-flight approval so that a gateway restart does not drop it. The durable state lives in Temporal (per §7); the hook's refactor is to represent these outcomes and to reconnect to an in-flight approval after a restart using the existing `toolCallId` / `runId` correlation ids.
+2. **Unification semantics, not one-hop replacement.** Agentopia already has working approvals at workflow level and thread level. What is missing is unification into the platform-wide model proposed in §7 — a shared decision schema, a shared approval-policy matrix, and a single operator UI. The Phase S work in §14 chooses between (a) sidecar mirrors thread lifecycle, (b) A2A emits into sidecar as authoritative state, (c) two primitives as peers with shared schema+UI. A spike is warranted to pick the option, not to verify whether approval works today (it does).
 3. **Approval-matrix schema and versioning.** The matrix is policy, not code. Versioning, migration, and reconciliation should follow the `reconcile-routing` / `reconcile-capability` control-plane pattern already established.
 4. **Operator UI — no OSS ships this.** Budgeting an in-house UI on top of existing `bot-config-api` endpoints is unavoidable. Temporal Web UI can send signals/updates but is not a routed approval inbox.
 5. **Signer identity discipline.** Temporal signals do not carry signer identity. Approver `actor_id` must be enforced at the `bot-config-api` API boundary and recorded in the sidecar state. The existing `OperatorCommand.actor_id` pattern in `DeliveryWorkflow` is the template.
@@ -383,7 +407,7 @@ Approval creation is idempotent on `(run_id, tool_call_id)`. Re-emitting the sam
 
 ## 13. Open Questions
 
-1. **A2A / relay unification choice.** A2A's `pending_approval` state and `/approve` endpoint already work and are tested (§4.3). Phase S (§14) must pick between three unification paths: (a) the sidecar mirrors A2A's thread lifecycle and A2A stays authoritative; (b) A2A's approval transitions emit into the sidecar and Temporal holds authoritative state, with a compatibility shim on the existing `/api/v1/threads/{thread_id}/approve` endpoint; (c) keep A2A and the sidecar as peers connected via a shared decision schema and a shared operator UI, with no migration of state. Each option is implementable; the decision affects migration cost and the long-term shape of the thread state directory.
+1. **A2A / relay unification choice.** A2A's `pending_approval` state and `/approve` endpoint already work and are tested (§4.3). Phase S (§14) must pick between three unification paths: (a) the sidecar mirrors A2A's thread lifecycle and A2A stays authoritative; (b) A2A's approval transitions emit into the sidecar and Temporal holds authoritative state, with a compatibility shim on the existing `/api/v1/threads/{thread_id}/approve` endpoint; (c) keep A2A and the sidecar as peers connected via a shared decision schema and a shared operator UI, with no migration of state. Each option is implementable; the decision affects migration cost and the long-term shape of the thread state directory. The same question exists, in milder form, for work-item approvals: they already fit the workflow/control-plane layer and should not be forced through the sidecar unless evidence later shows value.
 2. **Timeout defaults by action class.** For `admin_write` the fail-safe default should be `REJECTED`. For long-running reauthorization, the default should also be `REJECTED` (terminate the run). For `sessions_send`, `EDITED` with a redacted payload may be an acceptable default. These should be finalised in the approval-matrix first commit.
 3. **Edit-decision shape.** When an operator chooses `edit`, the structure of `edited_action` must be typed per action class. Leave as a per-action-class schema defined in the approval-matrix row, not a generic JSON blob.
 4. **Approval caching within a thread.** For `sessions_send`: an initial approval of a thread should probably auto-approve subsequent turns to the same session for some bounded window. Policy decision for the matrix first commit.
@@ -393,15 +417,15 @@ Approval creation is idempotent on `(run_id, tool_call_id)`. Re-emitting the sam
 
 ## 14. Final Recommendation
 
-**HITL is feasible for Agentopia with the current stack, recommended architecture Option 3 (Temporal sidecar + gateway-side sync block).** Implementation is scoped to Phase H3 of the Agent Harness Control Plane milestone. The deterministic lane is already shipping a production HITL pattern; the platform-wide primitive is generalising that pattern as the reusable `ApprovalSidecarWorkflow` and teaching `before_tool_call` to route sensitive action classes into it.
+**HITL is feasible for Agentopia with the current stack, recommended architecture Option 3 (preserve current workflow/thread checkpoints; add Temporal sidecar for generic tool approvals).** Implementation is scoped to Phase H3 of the Agent Harness Control Plane milestone. The deterministic lane is already shipping a production HITL pattern; the thread lane is already shipping a production checkpoint/resume pattern; the platform-wide step is to unify policy semantics and operator experience, and to add the missing generic primitive at the autonomous tool boundary.
 
 Recommended phasing, aligned with the milestone:
 
-- **Phase D (deterministic-lane generalisation, parallel to H2 / H2.5).** Lift the `DeliveryWorkflow` operator-update pattern into `ApprovalSidecarWorkflow`. Define the decision schema, the state schema, and the policy-matrix data model in `bot-config-api`. Zero gateway changes.
-- **Phase A (autonomous-lane wiring, Phase H3).** Extend `before_tool_call` with the policy lookup + sidecar dispatch + bounded await. Ship for `admin_write` and ACP spawn first (the smallest safe scope); extend to cross-session `sessions_send` and long-running reauthorization once operator UI exists.
+- **Phase D (deterministic/workflow-layer alignment, parallel to H2 / H2.5).** Keep `DeliveryWorkflow` and work-item approvals as valid insertion points. Define the shared decision schema, the state schema, and the policy-matrix data model in `bot-config-api`, and introduce `ApprovalSidecarWorkflow` only for generic approvals that do not already have a natural workflow/work-item home. Zero gateway changes.
+- **Phase A (autonomous-lane tool wiring, Phase H3).** Extend `before_tool_call` with the policy lookup + sidecar dispatch + bounded await. Ship for `admin_write` and ACP spawn first (the smallest safe scope); extend to cross-session `sessions_send` and long-running reauthorization once operator UI exists.
 - **Phase UI (operator inbox, Phase H3).** Build on top of `agentopia-ui` using the control-plane `/approvals/*` endpoints. No OSS substitute exists.
 - **Phase C (checkpoint policy matrix, Phase H3 close).** Finalise default timeouts per action class, escalation targets, edit schemas. Reconcile existing bots through a new `reconcile-approvals` endpoint modelled on `reconcile-routing`.
-- **Phase S (subagent / ACP / A2A native HITL, Phase H4).** After v1 stabilises, extend native participation to subagent and ACP runs. Verify A2A durability during this phase.
+- **Phase S (subagent / ACP / A2A / thread/work-item unification, Phase H4).** After v1 stabilises, extend native participation to subagent and ACP runs, and choose how much A2A thread approvals and work-item approvals should converge on the shared sidecar versus remain lane-local under a shared policy contract.
 
 No runtime-facts baseline decisions are overridden. No other approved docs are reopened. The two non-trivial surprises in the research — Temporal's signer-identity gap and Claude SDK's binary decision shape — are both handled by design (API-layer identity; {approve, reject, edit, escalate} decision set).
 
