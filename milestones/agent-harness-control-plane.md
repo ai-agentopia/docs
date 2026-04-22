@@ -196,6 +196,13 @@ The platform will not blindly use a planner-generator-evaluator trio everywhere.
 
 This keeps the harness simple where possible and richer only where the gains justify the cost.
 
+Human checkpoints are a **policy layer with multiple insertion points**, not a single mandatory hop. Under the current architecture, a checkpoint may live:
+- at the workflow/work-item boundary when the object under review is already a workflow or packet transition
+- at the A2A / relay thread boundary when the object under review is a thread epoch or debate continuation
+- at the autonomous tool boundary when a sensitive action has no natural workflow/thread home
+
+The harness milestone must unify decision semantics, policy ownership, and observability across these insertion points. It does **not** require every approval to be migrated into one workflow type before implementation can begin.
+
 ### 6.6 Runtime selection is policy, not prompt folklore
 
 The platform must decide which runtime classes are available for which work:
@@ -311,11 +318,13 @@ Deliver:
 - run trace schema and storage
 - task-class eval plan
 - first evaluator-enabled lane where evidence shows real value
+- insertion-point mapping for workflow-level, thread-level, and tool-level checkpoints under one policy contract
 
 Definition of done:
 - irreversible/high-impact actions have a checkpoint rule
 - harnessed runs are inspectable after the fact
 - at least one important task class has repeatable eval coverage
+- checkpoint semantics are aligned across workflow/work-item approvals, A2A / relay thread checkpoints, and autonomous tool-boundary approvals
 
 ### Phase H4 — ACP / Advanced Runtime Hardening
 

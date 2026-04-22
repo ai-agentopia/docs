@@ -117,7 +117,8 @@
             "group": "Roadmap",
             "pages": [
               "roadmap",
-              "milestones/agent-harness-control-plane"
+              "milestones/agent-harness-control-plane",
+              "milestones/agent-harness-implementation-plan"
             ]
           }
         ]

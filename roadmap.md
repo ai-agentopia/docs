@@ -109,6 +109,7 @@ Items below have GitHub milestones and/or design docs but no active execution.
 | Area | Description | Reference |
 |---|---|---|
 | **Worker Pool Routing** | Capability-aware dispatch — frontend tasks to frontend workers, backend to backend, sticky rework | [Design doc](architecture/worker-pool-routing-improvement-plan) |
+| **Agent Harness Control Plane** | Deterministic front doors, bounded autonomous runs, structured artifacts/handoffs, checkpoints, traces/evals, and governed ACP runtime selection | [Milestone](milestones/agent-harness-control-plane) |
 | **Multi-Step Planning with Human Approval** | Operator approval checkpoints between planning steps | Wave F milestone |
 | **Streaming & Real-Time Notifications** | Stream workflow progress and LLM output to operators in real-time | Wave F milestone |
 | **Advanced Multi-Agent Collaboration** | Parallel sub-agents, LLM-driven routing, multi-packet delivery, collaborative review | Wave G milestone |
