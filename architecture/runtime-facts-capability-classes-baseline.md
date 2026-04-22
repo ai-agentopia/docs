@@ -20,7 +20,7 @@ This baseline establishes four hard rules. First, self-knowledge facts about the
 
 Policy ownership is centralised: `agentopia-core` owns the capability-class enum, tool schemas, ambient-fact injection, and the safety rails; `bot-config-api` owns the per-bot `capabilityClass` declaration; the Helm chart renders policy from values without a hand-written allowlist. A separate containment workstream fixes the current user-visible regression without waiting for the full migration.
 
-The document is standalone and sufficient to hand to implementation owners.
+The document is standalone and sufficient to hand to implementation owners. Visual overviews are inlined at §8.1 (capability-class ladder), §10.1 (end-to-end turn flow with the three rails), and §12.1 (before vs after on the observed loop).
 
 ## 2. Problem Statement
 
@@ -168,6 +168,27 @@ The Conversant and Worker defaults are initial values to be reviewed after two w
 
 Additive capability bundles on top of the class ladder are explicitly deferred. If a future orthogonal capability emerges, it is introduced through a dedicated ADR with a specific motivating case.
 
+### 8.1 Capability-class ladder (diagram)
+
+```mermaid
+flowchart LR
+    C["🟢 Conversant<br/>maxToolCalls = 8<br/>─────────────<br/>group:fs-read<br/>knowledge_retrieve<br/>mem_recall"] --> W
+    W["🟡 Worker<br/>maxToolCalls = 12<br/>─────────────<br/>+ gov_list_*<br/>+ gov_get_*<br/>+ gov_search_code<br/>+ wf_status"] --> O
+    O["🟠 Orchestrator<br/>maxToolCalls = 40<br/>─────────────<br/>+ group:fs write<br/>+ sessions_*<br/>+ relay_*<br/>+ a2a_*<br/>+ wf_command<br/>+ gov_* write<br/>+ mcp_* (if enabled)"] --> A
+    A["🔴 Admin<br/>maxToolCalls = 40<br/>─────────────<br/>+ admin_inspect (read)<br/>+ admin_mutate (write,<br/>&nbsp;&nbsp;cap=1/turn, audited)"]
+
+    subgraph Default["⤴ default for a new bot"]
+        C
+    end
+```
+
+Reading notes:
+
+- Strict cumulative: each class inherits the full tool surface of the class to its left and adds more.
+- Minimum default for a new bot is Conversant. Admin is opt-in only via explicit control-plane annotation.
+- Cross-session tools (`sessions_*`, `relay_*`, `a2a_*`) enter at Orchestrator; Conversant and Worker never see them.
+- `session_status` is absent from every class: removed from agent-callable registration; only the operator `/status` UI path uses the internal formatter.
+
 ## 9. Ownership Boundaries
 
 | Concern | Owner | Notes |
@@ -202,6 +223,45 @@ Each capability class declares a total tool-call budget per turn (§8). When the
 The existing `tool-loop-detection` subsystem is enabled by default via chart values. Its `genericRepeat`, `knownPollNoProgress`, and `pingPong` detectors operate as a secondary net. The `globalCircuitBreakerThreshold` behaviour is retained for tools with stable outputs.
 
 **Prompt hints are not a rail.** Instructions such as "do not poll this tool" or "you already know the answer" may appear in prompt text where they improve UX, but they are never counted as safety. No future tool-addition review may assert prompt text as justification for omitting R1 or R2 coverage.
+
+### 10.1 End-to-end turn flow (diagram)
+
+```mermaid
+flowchart TD
+    U["👤 User turn<br/>'what model are you using?'"] --> GW["Gateway — chat.send"]
+    GW --> RT["Agent Runtime (agentopia-core)"]
+
+    RT --> PB["Prompt build (ambient facts)<br/>─────────────<br/>• SOUL / role<br/>• Runtime: model / provider / channel<br/>• Current Date &amp; Time (UTC + user TZ)"]
+
+    PB --> LLM["LLM via agentopia-llm-proxy"]
+    LLM --> DEC{"LLM: tool call needed?"}
+
+    DEC -->|"No — answers from ambient"| REPLY["💬 Reply to user"]
+
+    DEC -->|Yes| HOOK["before_tool_call hook"]
+    HOOK --> CLS{"Tool is in the bot's<br/>capability class?"}
+    CLS -->|No| BLK1["❌ blocked: out-of-class"]
+    CLS -->|Yes| R1{"R1: per-tool-per-turn<br/>cap not reached?<br/>(turn_id, tool, argsHash)"}
+    R1 -->|Reached| BLK2["❌ blocked: R1 loop cap"]
+    R1 -->|OK| R2{"R2: class maxToolCalls<br/>budget remaining?"}
+    R2 -->|Exhausted| BLK3["❌ blocked: R2 budget"]
+    R2 -->|OK| R3["R3: loop-detection<br/>pattern check"]
+    R3 --> RUN["✅ Tool handler runs"]
+    RUN --> LLM
+
+    classDef ambient fill:#1f6feb,color:#fff,stroke:#1f6feb
+    classDef safe fill:#238636,color:#fff,stroke:#238636
+    classDef block fill:#da3633,color:#fff,stroke:#da3633
+    class PB ambient
+    class RUN safe
+    class BLK1,BLK2,BLK3 block
+```
+
+Reading notes:
+
+- The blue box is where the baseline closes the loop class for self-knowledge questions: model, provider, channel, date/time are already in the prompt before the LLM runs, so no tool call is needed to answer them.
+- The three red gates (R1 / R2 / R3) sit on every tool call, not only on `session_status`-like tools. Any tool, present or future, traverses all three.
+- R1 is mechanical (args-hash based) and does not depend on tool output stability or on the model complying with a prompt hint.
 
 ## 11. Migration Plan
 
@@ -249,6 +309,42 @@ Containment and the final architecture are parallel workstreams, not sequential 
 | Acceptance | The original greeting replies in under three seconds; a five-turn smoke across three bots shows zero `session_status` calls | CI adversarial test passes; live Conversant p95 tool-calls-per-turn ≤ 3 |
 
 **Containment must ship before any bot is recreated from scratch.** Bot recreation with the current tool catalog would reproduce the loop on first use.
+
+### 12.1 Before vs after (diagram)
+
+```mermaid
+flowchart TB
+    subgraph BEFORE["❌ Before baseline"]
+        direction TB
+        U1["User: 'what model are you using?'"] --> SP1["System prompt:<br/>Runtime: model=... ← ambient<br/>+ 'use session_status first<br/>for model questions' ← contradiction"]
+        SP1 --> LLM1["LLM chooses: call session_status"]
+        LLM1 --> ST["session_status()<br/>→ card with time / usage / queue<br/>(volatile output)"]
+        ST --> LD["loop detector:<br/>• default OFF<br/>• even ON: resultHash changes,<br/>&nbsp;&nbsp;so circuit breaker never fires"]
+        LD --> LLM1
+        LLM1 -.->|"× 40 times"| FAIL["💥 maxToolCalls = 40 abort<br/>user sees 'Thinking...' for 3 min"]
+    end
+
+    subgraph AFTER["✅ After baseline"]
+        direction TB
+        U2["User: 'what model are you using?'"] --> SP2["System prompt:<br/>Runtime: model=... ← ambient<br/>(old contradicting instruction removed)"]
+        SP2 --> LLM2["LLM reads model from prompt<br/>→ replies in natural language"]
+        LLM2 --> OK2["💬 '…using openai-codex/gpt-5.4'<br/>— 0 tool calls"]
+
+        U3["(hypothetically: model still wants a tool)"] --> LLM3["LLM: call X()"]
+        LLM3 --> GATE["before_tool_call:<br/>• X in bot's capability class?<br/>• R1 cap reached? (default 3)<br/>• R2 budget reached? (Conversant = 8)<br/>• R3 pattern?"]
+        GATE -->|"at 4th call"| BLK["❌ R1 blocks<br/>→ reason returned to LLM<br/>→ model stops, replies in text"]
+    end
+
+    classDef bad fill:#da3633,color:#fff,stroke:#da3633
+    classDef good fill:#238636,color:#fff,stroke:#238636
+    class SP1,LD,FAIL bad
+    class SP2,OK2,BLK good
+```
+
+Reading notes:
+
+- The "before" loop did not depend on any one layer being absent; five layers in sequence (system-prompt instruction, tool catalog, chart allowlist, loop detector, `maxToolCalls`) each let the request through, and only the most expensive one (the 40-call budget) stopped it.
+- The "after" path defends in depth: ambient facts remove the need for a tool call on meta questions in the first place; the three mandatory rails (§10) cap any residual tool use independently of LLM compliance. No single rail is counted as sole protection.
 
 ## 13. Implementation Gates
 
