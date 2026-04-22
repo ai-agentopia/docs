@@ -73,7 +73,9 @@ Grounded in the current code and design docs:
 
 **Execution plane.** `agentopia-core` runs the per-bot gateway binary, which hosts the LLM run loop, the tool catalog, the plugin hooks (`knowledge-retrieval`, `mem0-api`, `relay`, `governance-bridge`, `wf-bridge`, `mcp-bridge`), the session manager, and the subagent/ACP spawn primitives. Evidence: the before-tool-call hook structure in `src/agents/pi-tools.before-tool-call.ts`, the loop-detection module in `src/agents/tool-loop-detection.ts`, the subagent spawn path in `src/agents/subagent-announce.ts` and `src/agents/acp-spawn.ts`.
 
-**Orchestration runtime — durable side.** Temporal workflows power delivery (`DeliveryWorkflow`, plan-dispatch-develop-review-merge). Per the roadmap: "LangGraph planner decomposes objectives into structured work packets" — LangGraph is used *inside* a Temporal activity, not as a parallel orchestrator. This is already the correct layering.
+**Orchestration runtime — durable side (post-trigger only).** Temporal workflows power delivery (`DeliveryWorkflow`, plan-dispatch-develop-review-merge) *once the workflow is triggered*. Per the roadmap: "LangGraph planner decomposes objectives into structured work packets" — LangGraph is used *inside* a Temporal activity, not as a parallel orchestrator. This is the correct layering for the post-trigger body of delivery.
+
+**Delivery-start ingress is soft, not deterministic.** This is the most important correction to any casual "Temporal owns delivery" claim. Per [p0.5 — Deterministic Delivery Start Front Door](../p0.5-deterministic-delivery-start.md) (status: **CLOSED/DEFERRED** as of 2026-03-22), the current delivery-start path still depends on LLM prompt compliance to call the `start_delivery` tool. Option C2 (hook-based `/deliver` in `before_agent_start`) was rejected after spike failure; separate-ingress investigation concluded the gateway owns the Telegram connection via the OpenClaw framework as an opaque binary with no intercept point, so separate ingress requires a **gateway fork** (milestone #25) and is deferred. The platform has adopted a permanent dual-lane model in the interim ("delivery lane" guided by SOUL contract; "consultation lane" open for orchestrator) with the explicit accepted trade-off that "start-path integrity relies on LLM prompt compliance, not code enforcement." Temporal owns the durable body of a delivery run; it does **not** own the delivery-start ingress today. Any architecture that treats delivery-start as a solved deterministic front door is wrong on the current state.
 
 **Orchestration runtime — ephemeral side.** A2A JSON-RPC threads support debate / bridge / epoch patterns with turn ordering, max-turn control, checkpoints, idempotency, and recovery semantics. Evidence: `architecture/a2a-full-design.md`. A2A is ephemeral (in-memory/Redis-backed thread state), complementary to Temporal's durable workflows.
 
@@ -96,7 +98,8 @@ Grounded in the current code and design docs:
 | Harness capability | Current state | Evidence | Maturity | Notes |
 |---|---|---|---|---|
 | Run loop with mechanical stop conditions | Partial — maxToolCalls universal 40; no per-tool-per-turn cap | `src/agents/tool-loop-detection.ts` default-off; `pi-tools.before-tool-call.ts` wires the hook | 🟡 L2 | R1 new detector is the Phase-1 delta the runtime-facts baseline locked |
-| Deterministic orchestrator with non-det activities | Strong for delivery; weak elsewhere | Temporal `DeliveryWorkflow`; nothing equivalent for workflow cancel, admin mutation, approval transitions | 🟢 L4 in one domain; 🟡 L2 platform-wide | Phase H1's deterministic front doors extend this to every typed intent |
+| Deterministic orchestrator body (post-trigger) | Strong for delivery | Temporal `DeliveryWorkflow`; LangGraph planner inside an activity | 🟢 L4 in one domain | Temporal owns the durable body once a delivery run starts |
+| Deterministic ingress / typed front door | **Missing for chat-originated intents** | p0.5 CLOSED/DEFERRED: delivery-start is soft (prompt-compliance); C2 rejected; separate ingress blocked on gateway fork (#25) | 🔴 L0 for chat ingress; N/A for non-chat | This is the canonical unresolved harness gap, not a solved example |
 | Tool-call boundary enforcement | Partial — in-runtime per-bot allowlist from chart `tools.allow`; no policy-as-config per role | `charts/agentopia-bot/templates/configmap-config.yaml` line 183 `group:sessions` unconditional | 🟡 L2 | Capability classes + per-class render (baselined) is the Phase-2 delta |
 | Subagent / delegation primitives | Strong primitives; not governed by unified contract | `subagent-announce.ts`, `acp-spawn.ts`; docs `tools/subagents.md`, `tools/acp-agents.md` | 🟢 L3 capability; 🟡 L2 governance | Phase H4 hardens ACP into an explicitly-governed lane |
 | Run contract per autonomous run | Missing | No typed run metadata carries across A2A / subagent / ACP; no stop-condition contract | 🔴 L0 | Phase H2 delta |
@@ -117,7 +120,7 @@ The assessment reconfirms the partial-harness-control baseline: the platform is 
 
 Five gaps separate the current platform from a production bounded-autonomy harness. Each is a specific, concrete delta, not a vague aspiration.
 
-1. **No intent router.** There is no single place where "this user/system intent requires a deterministic front door" vs "this intent enters an autonomous run" is decided. Delivery-start is deterministic because p0.5 typed it that way; almost nothing else is. The router itself is ~300 LoC of Agentopia-owned code and a registry of typed intents.
+1. **No intent router, and no deterministic ingress for chat-originated typed intents.** There is no single place where "this intent requires a deterministic front door" vs "this intent enters an autonomous run" is decided. Delivery-start is the canonical *unresolved* case: p0.5 diagnosed the gap correctly, C2 was rejected, separate ingress investigation concluded that the gateway owns the Telegram connection as an opaque binary and a deterministic ingress requires a **gateway fork** (milestone #25) — so the current delivery-start path remains soft / prompt-compliance-based. The intent-router registry itself (metadata for which intents should be deterministic, which are autonomous) is small Agentopia-owned code and can land in the control plane immediately; the *realisation* of deterministic ingress for chat-originated intents cannot land purely in the control plane — it needs the gateway fork lane that p0.5 deferred. Any phasing that conflates these two is wrong.
 2. **No universal run contract.** A2A threads have their own turn/checkpoint model; subagents have parent/child lifecycle; ACP has its own spawn contract; direct specialist chats have none. A shared schema (`{run_id, goal_type, runtime, capability_class, wall_clock_budget, tool_budget, stop_conditions, expected_artifact_shape, escalation_policy, trace_id}`) must be the input to every autonomous run and the output of every checkpoint/evaluator step. This is domain-specific; no OSS primitive replaces it.
 3. **No trace/eval infrastructure at the harness layer.** The platform has logs, not structured traces. Every L4 harness in the research has OTEL emission as a baseline. Building this from scratch is unnecessary: the OpenInference + OTEL + Phoenix (or Langfuse) stack is mature, OSS, and agnostic. Integration, not building.
 4. **No artifact taxonomy.** Delivery has a work-packet shape. Nothing else does. Structured handoff between sessions, subagents, and ACP runs currently relies on chat continuity. This must be defined by Agentopia (domain-specific) and persisted by Agentopia (can use Postgres or the existing workflow state; does not require a dedicated artifact store).
@@ -135,7 +138,8 @@ Gaps *not* in the list because they are either already strong or out-of-scope: M
 | Agent-to-agent protocol | In-house A2A (JSON-RPC) | a2aproject spec / SDKs | **Keep in-house.** | The a2aproject spec is not ratified and offers no operational benefit over the existing in-house protocol, which is already productionised. Re-evaluate in 12 months if standardisation matures. | N/A | None |
 | Tool/context protocol | In-house MCP bridge | Continue MCP expansion | **Continue.** | MCP is the correct protocol at this layer; Agentopia already integrates it cleanly. No action beyond ongoing expansion. | N/A | None (open standard) |
 | Editor/external-agent protocol | In-house ACP harness | ACP spec (Zed) | **Keep, align to spec.** | ACP is complementary to MCP and ACP harness is already Agentopia-owned; aligning the in-house surface to Zed's ACP spec where feasible removes integration friction. | Medium (one-off) | None (open protocol) |
-| Tool-call boundary (per-role allowlist) | Helm chart `tools.allow` → control-plane `capabilityClass` (baselined) | OPA / Cedar-agent / Permit.io | **Build. Defer OPA/Cedar until Phase H3+.** | Capability classes as an enum + control-plane emission is domain-specific and cheap. OPA/Cedar is an optional future extraction if policy-as-rego/cedar ever adds value; today Python + typed enums are sufficient. | Low | Low |
+| Tool-call boundary (per-role allowlist) — **current state** | Hand-written `tools.allow` list in Helm chart `charts/agentopia-bot/templates/configmap-config.yaml` (line 183 area); flat across bots; `wfBridgeRoleKey=="orchestrator"` is the only live role gate | — | — | Current: policy is hand-maintained at chart level; no control-plane class abstraction is live yet | — | — |
+| Tool-call boundary (per-role allowlist) — **target / baselined direction** | Agentopia control plane (`capability-classes.ts` in core + `capabilityClass` per bot in `bot-config-api` + chart renders `tools.allow` from `.Values.capabilityClass`) | OPA / Cedar-agent / Permit.io | **Build. Defer OPA/Cedar until Phase H3+.** | Capability classes as an enum + control-plane emission is domain-specific and cheap; replaces the hand-written list. OPA/Cedar is an optional future extraction if policy-as-rego/cedar ever adds value; today Python + typed enums are sufficient. | Low | Low |
 | Runaway-prevention rails (R1/R2/R3) | Agentopia (baselined; Phase 1 pending) | None credible OSS | **Build.** | No OSS project provides per-tool-per-turn caps with turn-id awareness. This is domain-specific and small (~200 LoC + test). | Low | None |
 | Sub-agent / delegation primitive | `sessions_spawn`, ACP harness | Claude Agent SDK patterns (reference only) | **Keep in-house. Adopt Claude's one-way input pattern as a contract.** | Claude SDK's "subagents cannot spawn subagents; only final message returns" is the right invariant. Codify it in Agentopia's subagent contract. | None (contract-level) | None |
 | Human-in-the-loop checkpoints | Governance transitions (partial) | LangGraph interrupt/resume / Temporal signals | **Build on Temporal signals.** | Temporal already owns durability. LangGraph's pattern is useful as a reference; reimplementing it on Temporal signals is trivial and avoids dual-durability stores. | Medium | None |
@@ -200,11 +204,22 @@ The target architecture is a **hybrid harness**: Agentopia owns the domain-speci
                               │ runs
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  Intent router        Temporal (deterministic front door)         │
-│  + durable lane       • workflow start/cancel, admin mutate,      │
-│                         approval transitions                      │
+│  Deterministic        Temporal workflows (durable body)           │
+│  lane (durable body)  • workflow cancel, approval transitions     │
+│                         where ingress is already HTTP/API         │
 │                       • Workflow = deterministic orchestrator     │
 │                       • Activity = LLM calls, tool calls, etc.    │
+│                                                                   │
+│   ⚠ Chat-originated ingress (e.g. delivery-start from an          │
+│     orchestrator chat) cannot be realised in Temporal alone.      │
+│     Per p0.5 (CLOSED/DEFERRED), this requires the gateway-fork    │
+│     lane (#25) to intercept at the Telegram adapter before the    │
+│     LLM sees the message. Today this path is soft; the intent     │
+│     router can CLASSIFY it but cannot ENFORCE a deterministic     │
+│     ingress for it until the fork lands.                          │
+│                                                                   │
+│   Note: admin mutation is NOT in this lane. Per the runtime-      │
+│   facts baseline it is an Admin-class tool (`admin_mutate`).      │
 └──────────────────────────────────────────────────────────────────┘
                               │ dispatches to
                               ▼
@@ -240,16 +255,29 @@ The target architecture is a **hybrid harness**: Agentopia owns the domain-speci
 ### 10.2 What owns what
 
 - **Run contract schema** — Agentopia (new, shared across core + control plane).
-- **Intent router + typed front-door registry** — Agentopia control plane.
-- **Deterministic lane** — Temporal workflows (extend existing).
+- **Intent router + typed front-door registry** — Agentopia control plane (classifier only; ingress realisation for chat-originated intents is blocked on the gateway fork per p0.5).
+- **Deterministic lane — durable body** — Temporal workflows (extend existing where ingress is already HTTP/API, e.g. workflow cancel, explicit admin/approval APIs invoked directly by trusted non-chat clients).
+- **Deterministic lane — chat-originated ingress** — **Not yet realisable.** Requires the gateway-fork lane (#25). The intent-router classifier can mark a chat intent as "should-be-deterministic" and surface it to operators, but it cannot enforce a deterministic ingress on the Telegram/chat path until the fork lands. Delivery-start is the canonical case.
 - **Autonomous lane** — Agentopia gateway run loop (the thing being hardened).
 - **Tool-call boundary** — Agentopia R1/R2/R3 + capability-class filter (baselined; Phase 1 implementation).
+- **Admin mutation** — **Admin-class tool surface (`admin_mutate`)**, per the approved runtime-facts baseline (closed enum, cap=1/turn, audit-logged). This is explicitly *not* a Temporal-lane ingress in the approved baseline. See §10.4 for the debated alternative and its status.
 - **Sub-agent invariants** — Agentopia; adopt Claude-style "only final message returns; children cannot spawn children".
 - **HIL checkpoints** — Temporal signals (extend); control plane owns the policy matrix.
 - **Traces + evals** — OTEL + OpenInference + Phoenix/Langfuse (integrate).
 - **Tool protocol** — MCP (keep, expand).
 - **Agent↔agent** — A2A in-house (keep).
 - **External/editor runtime** — ACP harness (keep, align to Zed spec where feasible).
+
+### 10.4 Debated alternative: deterministic admin-mutation ingress (NOT yet approved)
+
+An alternative worth naming, explicitly so it is not silently adopted: admin mutation could also be modelled as a deterministic Temporal front door — a typed `admin.mutate` intent that enters through a non-chat HTTP path (operator dashboard / ops tooling) and runs as a workflow with its own audit and checkpoint policy, entirely outside the agent tool surface.
+
+This alternative is **not aligned with the currently approved baseline**, which defines `admin_mutate` as an Admin-class tool with a closed enum, cap=1/turn, audit-log sink (Phase 2.5 gate). Making admin mutation a deterministic workflow ingress instead of (or in addition to) an Admin-class tool would require:
+- a separate ARB decision overriding the approved tool-shape for admin mutation;
+- a non-chat ingress path for admin actions (bot-config-api endpoint or ops UI), which is far less constrained than the chat-ingress problem p0.5 surfaced;
+- a new audit contract that reconciles with the Phase 2.5 sink.
+
+This document does **not** override the approved baseline. Deterministic admin mutation is listed here as a future option for explicit ARB debate, not as a recommendation. Implementation planning should target the approved `admin_mutate` Admin tool shape.
 
 ### 10.3 What the target architecture explicitly does not include
 
@@ -267,7 +295,17 @@ Migration is phased, matches the Agent Harness Control Plane milestone (Phases H
 Ship the `session_status` containment per the runtime-facts baseline §12 (system-prompt edit + chart `tools.allow` + loopDetection.enabled + maxToolCalls=12). Required before any bot is recreated from scratch. Not a harness phase; listed here for completeness.
 
 **Phase H1 — Intent router + deterministic front doors.**
-Build the typed-intent registry in `bot-config-api`. Move `workflow start/cancel`, `admin mutate`, `approval transitions` into Temporal workflows with typed inputs. Classify every production entry path as deterministic or autonomous; waive with explicit reason or convert. No runtime change in `agentopia-core`. Deliverable: registry + routing rules + per-path classification report.
+H1 must be split into two distinct sub-phases because the approved baseline (p0.5) has already demonstrated that chat-originated deterministic ingress cannot be implemented in the control plane alone.
+
+- **Phase H1a — Control-plane classifier and typed-intent registry (control-plane-only).**
+  Build the typed-intent registry in `bot-config-api`. Classify every production entry path as deterministic-today, should-be-deterministic-but-chat-ingress-pending-fork, or autonomous-by-design. Move into Temporal workflows with typed inputs any path whose ingress is already non-chat (HTTP/API/ops), e.g. `workflow cancel` when triggered by an operator dashboard, and the workflow-internal `approval transitions` that the workflow layer itself invokes. No runtime change in `agentopia-core` for this sub-phase. Deliverable: registry + classifier + per-path classification report + the subset of typed Temporal front doors that do not require chat ingress.
+
+- **Phase H1b — Gateway-fork ingress for chat-originated typed intents (runtime/gateway lane).**
+  For chat-originated intents whose classifier verdict is "should-be-deterministic" (delivery-start is the canonical case, also any future `/command`-style typed intent on a messaging surface), deterministic ingress requires the gateway fork lane already scoped in milestone #25 and referenced by p0.5's deferred separate-ingress workstream. H1b **depends on** the gateway fork and cannot close without it. Until H1b lands, the control-plane classifier may surface these paths to operators and to dashboards, but the platform continues to rely on the permanent dual-lane model (SOUL-guided delivery tool + consultation relay) documented in p0.5 as the accepted interim trade-off.
+
+**Important:** Do not present H1 as a control-plane-only phase. The chat-ingress half is blocked on the same gateway-fork work that p0.5 already decided is the only viable path. Any phasing diagram or project plan that omits H1b is underscoped.
+
+- **Phase H1 admin scope.** Admin mutation is explicitly **not** part of Phase H1 under the currently approved baseline; it is implemented as the `admin_mutate` Admin-class tool in Phase H2.5. The alternative (deterministic admin-mutation ingress) is documented in §10.4 for possible future ARB debate, but is not in H1.
 
 **Phase H2 — Run contract + artifact handoff.**
 Publish the run-contract schema (shared TS + Python). Attach it to every autonomous run path: direct specialist chat, A2A thread turn, subagent spawn, ACP spawn. Persist artifacts (plans, task packets, checkpoint summaries, outcomes) in Postgres. Stop conditions become mandatory. Deliverable: schema + persistence + `reconcile-capability` endpoint modelled on `reconcile-routing`.
@@ -281,7 +319,7 @@ Instrument the gateway with OTEL + OpenInference. Stand up the chosen backend (P
 **Phase H4 — ACP hardening.**
 Align the in-house ACP surface with the Zed ACP spec where feasible. Restrict ACP to Orchestrator/Admin classes (already baselined). Ensure ACP runs emit the same run-contract and traces as other harnessed runs. Deliverable: ACP runs instrumented identically to direct specialist runs; class gating enforced.
 
-**Ordering rationale.** H1 before H2 because intent classification is the input to the run-contract. H2.5 between H2 and H3 because the run-contract schema needs `capabilityClass` as a field before traces start referencing it. H3 last among the three core phases because traces should cover the finished contract, not a moving target. H4 after H3 because ACP hardening benefits from being instrumentable.
+**Ordering rationale.** H1a before H2 because intent classification is the input to the run-contract. H1b is parallel to H2/H2.5/H3 and closes whenever the gateway fork lands; H2/H2.5/H3 are not blocked on H1b because the run-contract + capability classes + traces operate on the autonomous lane regardless of whether a specific intent later graduates to deterministic chat ingress. H2.5 between H2 and H3 because the run-contract schema needs `capabilityClass` as a field before traces start referencing it. H3 last among the three core sequential phases because traces should cover the finished contract, not a moving target. H4 after H3 because ACP hardening benefits from being instrumentable.
 
 **Migration compatibility contract.** Existing live bots must survive every phase. The `reconcile-capability` endpoint mirrors `reconcile-routing` semantics: patch `valuesObject` atomically; ArgoCD selfHeal picks up the change; the ConfigMap checksum rolls the pod. No manual ConfigMap patches. No destructive migrations. The explicit `wfBridgeRoleKey` → `capabilityClass` derivation is documented and tested.
 
