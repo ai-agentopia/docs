@@ -63,6 +63,7 @@
           {
             "group": "Harness & Safety",
             "pages": [
+              "architecture/harness-control/harness-architecture",
               "architecture/harness-control/runtime-facts-capability-classes-baseline",
               "architecture/harness-control/orchestrated-multi-agent-platform-partial-harness-control",
               "architecture/harness-control/harness-system-deep-dive-debate"
