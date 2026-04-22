@@ -61,9 +61,11 @@
             ]
           },
           {
-            "group": "Runtime & Safety",
+            "group": "Harness & Safety",
             "pages": [
-              "architecture/runtime-facts-capability-classes-baseline"
+              "architecture/harness-control/runtime-facts-capability-classes-baseline",
+              "architecture/harness-control/orchestrated-multi-agent-platform-partial-harness-control",
+              "architecture/harness-control/harness-system-deep-dive-debate"
             ]
           },
           {
@@ -112,7 +114,8 @@
           {
             "group": "Roadmap",
             "pages": [
-              "roadmap"
+              "roadmap",
+              "milestones/agent-harness-control-plane"
             ]
           }
         ]
