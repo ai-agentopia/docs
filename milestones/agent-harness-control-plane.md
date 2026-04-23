@@ -315,7 +315,7 @@ Goal: attach feedback and verification loops to the harness.
 
 Deliver:
 - checkpoint policy matrix
-- run trace schema and storage
+- run trace schema and storage (backend selection + production design resolved: [ADR-015](../adrs/015-h3-02-trace-backend-langfuse), [H3 Observability Production Design](../architecture/harness-control/h3-observability-production-design))
 - task-class eval plan
 - first evaluator-enabled lane where evidence shows real value
 - insertion-point mapping for workflow-level, thread-level, and tool-level checkpoints under one policy contract

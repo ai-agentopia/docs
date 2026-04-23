@@ -34,7 +34,7 @@ The plan is deliberately **not** a greenfield rewrite. It is an evolution: prese
 - Re-opening accepted architecture (capability ladder, `admin_inspect`/`admin_mutate` split, runtime-facts R1/R2/R3, A2A retained in-house).
 - Greenfield replacement of the current gateway or Temporal layer.
 - Business-model decisions (tenant isolation, billing, multi-org).
-- Specific vendor selection outside two explicitly scoped work packages (Phoenix vs Langfuse trace backend; ACP runtime hardening surface).
+- Specific vendor selection outside two explicitly scoped work packages (trace backend — **resolved by [ADR-015](../adrs/015-h3-02-trace-backend-langfuse): Langfuse selected**; ACP runtime hardening surface).
 - Chat-originated deterministic ingress prior to the gateway fork (milestone #25) landing — planned here, but gated.
 
 ---
@@ -155,7 +155,7 @@ Every phase entry uses the same shape: **Goal · Repos · Deliverables · Depend
 ### Phase H3 — Traces / evals / unified checkpoint policy
 - **Goal.** Platform-level observability and HITL unification: OTEL + OpenInference traces, one trace backend, eval harness, and a checkpoint policy matrix that covers workflow, thread, and tool-boundary checkpoints behind one decision surface.
 - **Repos.** `agentopia-core`, `agentopia-protocol`, `agentopia-infra`.
-- **Deliverables.** OTEL + OpenInference instrumentation (`WP-H3-01`); trace-backend selection — Phoenix vs Langfuse — via an explicit ADR (`WP-H3-02`); eval harness keyed off `RunContract` (`WP-H3-03`); checkpoint policy matrix (`WP-H3-04`); promote `before_tool_call` to a pluggable checkpoint interception with expanded result contract — `pending`/`edited`/`escalated`/`timeout` (`WP-H3-05`); ApprovalSidecarWorkflow generic primitive (`WP-H3-06`); unify workflow / work-item / thread approval semantics behind the policy matrix (`WP-H3-07`).
+- **Deliverables.** OTEL + OpenInference instrumentation (`WP-H3-01` — protocol-side groundwork landed in [protocol#487](https://github.com/ai-agentopia/agentopia-protocol/pull/487); core-side pending); trace-backend selection — **resolved: Langfuse selected per [ADR-015](../adrs/015-h3-02-trace-backend-langfuse); production design in [H3 Observability Production Design](../architecture/harness-control/h3-observability-production-design)** (`WP-H3-02`); eval harness keyed off `RunContract` (`WP-H3-03`); checkpoint policy matrix (`WP-H3-04`); promote `before_tool_call` to a pluggable checkpoint interception with expanded result contract — `pending`/`edited`/`escalated`/`timeout` (`WP-H3-05`); ApprovalSidecarWorkflow generic primitive (`WP-H3-06`); unify workflow / work-item / thread approval semantics behind the policy matrix (`WP-H3-07`).
 - **Dependencies.** H2 (traces and checkpoints key off the contract).
 - **Known blockers.** `before_tool_call` result shape today is `{params, block, blockReason}`; expanding it is a breaking change for existing plugins — needs staged migration.
 - **Acceptance.** (a) A single trace spans gateway → plugin → Temporal → A2A with OpenInference semantic conventions; (b) eval suite runs nightly against production contracts; (c) every HITL insertion point reads the same policy matrix; (d) `before_tool_call` supports the four new outcome types behind a flag with parity against existing plugins.
@@ -229,7 +229,7 @@ Each work package is scoped to fit one PR-sized unit unless the description says
 | ID | Title | Repo(s) | Leverage | Notes |
 |---|---|---|---|---|
 | WP-H3-01 | OTEL + OpenInference instrumentation | `agentopia-core`, `agentopia-protocol` | Existing logging spans where present | Semantic conventions from OpenInference. |
-| WP-H3-02 | Trace-backend ADR: Phoenix vs Langfuse | `docs` | Self-hosted constraint from CLAUDE.md | OSS + K8s-native; decide before WP-H3-01 wiring lands. |
+| WP-H3-02 | Trace-backend ADR + production design | `docs` | Self-hosted constraint from CLAUDE.md | **Resolved: Langfuse selected ([ADR-015](../adrs/015-h3-02-trace-backend-langfuse)); production design at [h3-observability-production-design](../architecture/harness-control/h3-observability-production-design).** |
 | WP-H3-03 | Eval harness keyed off `RunContract` | `agentopia-protocol` | Existing delivery evals | Nightly; contract-bound. |
 | WP-H3-04 | Checkpoint policy matrix | `agentopia-protocol`, `docs` | DeliveryWorkflow, work-item, thread checkpoints | Three insertion points remain; policy decides which fires. |
 | WP-H3-05 | Expand `before_tool_call` result contract | `agentopia-core` | `PluginHookBeforeToolCallResult` already async | Add `pending` / `edited` / `escalated` / `timeout`; staged migration flag. |
@@ -368,7 +368,7 @@ A phase exits only when every gate below is met — documented, observed, and si
 
 - **Gateway fork timeline (milestone #25).** H1b is hard-gated. If #25 slips, H1b slips — do **not** fall back to a pre-fork hack that would contradict binding rule #3.
 - **`before_tool_call` result-contract breaking change.** WP-H3-05 must stage carefully; a naive flip will break in-flight plugins.
-- **Trace backend lock-in.** OSS + K8s-native constraint narrows the field but both Phoenix and Langfuse have operational trade-offs; the ADR (WP-H3-02) is the single decision point.
+- **Trace backend lock-in.** Resolved via [ADR-015](../adrs/015-h3-02-trace-backend-langfuse): Langfuse (MIT core). Reversibility is preserved by keeping emission in OTLP + OpenInference — swap remains a deployment change, not a code rewrite. Operational surface and tenancy model specified in [H3 Observability Production Design](../architecture/harness-control/h3-observability-production-design).
 - **Capability-class migration blast radius.** H2.5 touches every bot's tool surface. Shadow-diff window is mandatory, not optional.
 - **HITL unification misreading.** The shared policy layer must not be mistaken for a single mandatory hop — three insertion points remain production surfaces. A plan that collapses them is **non-conforming**.
 - **ACP upstream maturity.** H4 depends on external ACP evolution; shim as needed, do not stall H1–H3 waiting.
@@ -381,7 +381,7 @@ A phase exits only when every gate below is met — documented, observed, and si
 
 These are **planning** questions — not architecture questions. Each must resolve before its gate phase starts.
 
-1. **Trace backend — Phoenix or Langfuse?** (Gate: start of H3 — WP-H3-02.) OSS + K8s-native; evaluate on operational cost, OpenInference support, multi-tenant readiness.
+1. ~~**Trace backend — Phoenix or Langfuse?**~~ **Resolved** 2026-04-23 via [ADR-015](../adrs/015-h3-02-trace-backend-langfuse): Langfuse (MIT core). Production design in [H3 Observability Production Design](../architecture/harness-control/h3-observability-production-design). Remaining open items inside that design are tracked in its §15.2, not here.
 2. **Artifact persistence — object store or dedicated service?** (Gate: start of H2 — WP-H2-02.) Decide via ADR.
 3. **Pilot intent for H1b.** Which single chat intent migrates first through Temporal? Must be low-blast-radius and high-determinism.
 4. **R2 default caps.** Baseline sets Conversant=8 / Worker=12 / Orchestrator=40 / Admin=40 — are those the numbers we ship on day 1, or do we start lower and raise?
