@@ -4,7 +4,7 @@ title: "H3 Observability — Production Design"
 
 # H3 Observability — Production Design
 
-**Status:** **Draft.** Phase-α deployment shape is specified and ready to implement. Production steady-state target architecture is specified with open gaps called out in §14 and §16. Not yet promoted to Accepted.
+**Status:** **Draft.** Phase-α deployment shape is specified and ready to implement. Production steady-state target architecture is specified with open gaps called out in §14 and §16. Not yet promoted to Accepted. Promotion is tracked at [ai-agentopia/docs#34](https://github.com/ai-agentopia/docs/issues/34).
 **Date:** 2026-04-23
 **Owner:** Platform Architecture
 **Scope:** Design of the Agent Harness trace/eval subsystem in two explicitly separated architecture states — the phase-α deployment shape we land now, and the production steady-state target architecture we commit to converging on.
