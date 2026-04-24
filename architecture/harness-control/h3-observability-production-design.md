@@ -4,10 +4,10 @@ title: "H3 Observability — Production Design"
 
 # H3 Observability — Production Design
 
-**Status:** **Draft.** Phase-α deployment shape is specified and ready to implement. Production steady-state target architecture is specified with open gaps called out in §14 and §16. Not yet promoted to Accepted. Promotion is tracked at [ai-agentopia/docs#34](https://github.com/ai-agentopia/docs/issues/34).
-**Date:** 2026-04-23
+**Status:** **Draft.** Phase-α deployment shape is specified and ready to implement. Production target is single-node (same deployment shape as phase α), with off-cluster backup/restore as the primary durability strategy. Single-node loss is an accepted outage at production. HA is explicitly deferred. Promotion criteria are in §14.5. Promotion is tracked at [ai-agentopia/docs#34](https://github.com/ai-agentopia/docs/issues/34).
+**Date:** 2026-04-23 (revised 2026-04-24 — HA target removed; production = single-node + backup contract)
 **Owner:** Platform Architecture
-**Scope:** Design of the Agent Harness trace/eval subsystem in two explicitly separated architecture states — the phase-α deployment shape we land now, and the production steady-state target architecture we commit to converging on.
+**Scope:** Design of the Agent Harness trace/eval subsystem in two explicitly separated architecture states — the phase-α deployment shape (dev/staging) and the production target (single-node, restore-from-backup, operationally hardened).
 **Binding inputs:**
 - [Harness Architecture](./harness-architecture.md) (B1)
 - [ADR-015 — Trace Backend Selection: Langfuse](../../adrs/015-h3-02-trace-backend-langfuse.md) (backend decision)
@@ -18,14 +18,14 @@ This document specifies how the selected backend is deployed, integrated, and op
 
 ### Two architecture states
 
-This document intentionally specifies **two** architectures, not one:
+This document intentionally specifies **two** architecture states, not one:
 
 | State | Definition | Binding? |
 |---|---|---|
-| **Phase α** | What we deploy first. Non-HA, single-replica, on `local-path` storage. Dev / staging / early production on the current single-node cluster. Chosen for operational simplicity at current volume (§11.1). Single-node loss is an acceptable outage in this state. | Yes, on the phase-α rollout. Superseded — not merely extended — by the steady-state target. |
-| **Production steady state** | Where the subsystem must converge before we call observability "production-hardened." HA for durable data backends, replicated storage class, multi-node failure domain, automated PITR, and explicit SLO commitments (§14). **Single-node loss is NOT acceptable in this state.** | Yes. Gaps called out with explicit open questions in §14 and §16 are blockers on promotion, not aspirations. |
+| **Phase α** | What we deploy first. Non-HA, single-replica, on `local-path` storage. Dev/staging on the current single-node cluster. Chosen for operational simplicity at current volume (§11.1). Single-node loss is an accepted outage. Not yet production. | Yes, on the phase-α rollout. |
+| **Production (single-node)** | The production target. **Same deployment topology as phase α** — single-node, `local-path`, single-replica for every backend. The distinction from phase α is **operational, not topological**: retention policy is enforced, off-cluster backup contract is active and rehearsed, auth is hardened, sizing is validated, all planes are emitting spans. **Single-node loss is still an accepted outage in production.** HA is explicitly deferred and is not part of this document's production target. | Yes. Gaps in §14 and §16 are blockers on promotion, not aspirations. |
 
-Every §§5–13 section below either applies to both states or is split into a "Phase α" / "Production steady state" pair. §14 consolidates the steady-state commitments — HA, storage class, failure domain, backup target, single-node-loss stance — so a reviewer can read that section alone and understand the target.
+**HA is not the production bar.** The previous revision of this document set an HA steady state as the production target. That target has been rescoped. Restore-from-backup is the durability strategy; automated failover is deferred. §14 consolidates the production commitments — backup contract, retention enforcement, auth, accepted risk register — so a reviewer can read that section and understand what production means here.
 
 ---
 
@@ -35,7 +35,7 @@ The Agent Harness emits OpenInference-tagged OTLP spans keyed to a single `RunCo
 
 The observability subsystem is not a Helm chart. It is a contract with four parts: (1) a storage topology whose components each serve a distinct data class; (2) a tenancy model that maps Langfuse's organization/project primitives onto Agentopia's capability-class and lane structure; (3) an integration surface that every Agentopia plane — control-plane, autonomous-plane, deterministic spine, A2A threads — plugs into through the same `RunContract` identity; and (4) an operational model with explicit retention, backup, and SLO commitments. Helm renders the deployment; it does not own any of the four parts above.
 
-Rollout is three phases. **Phase α** deploys the service in internal-only, single-replica form on `local-path` storage and wires the already-landed protocol-side groundwork to it — single-node loss is an accepted outage in this state. **Phase β** extends emission across `agentopia-core`, Temporal, and A2A boundaries without changing the deployment shape. **Phase γ** is the hardening round that converges the deployment on the production steady-state target (§14): HA backends, replicated storage class, multi-node failure domain, automated PITR. Promotion to production-hardened requires phase γ completion; phase α + β alone is **not** the production target.
+Rollout is two phases followed by a production promotion gate. **Phase α** deploys the service in internal-only, single-replica form on `local-path` storage and wires the already-landed protocol-side groundwork to it. **Phase β** extends emission across `agentopia-core`, Temporal, and A2A boundaries without changing the deployment shape. **Production promotion** is the operational hardening gate (§14.5): retention enforced, backup contract active with verified off-cluster target, auth hardened, sizing validated, 30-day SLO burn-in. The deployment shape does not change at promotion — it is the operational commitments that gate it. HA hardening is explicitly deferred and is not on this rollout's critical path.
 
 ---
 
@@ -160,16 +160,18 @@ Langfuse has four storage backends, each serving a distinct data class. The arch
 
 ### 5.1 Component inventory
 
-Two columns: the phase-α deployment shape and the production steady-state target. Phase β does **not** change either column — it only extends emission coverage; deployment shape remains phase-α until phase γ.
+Two columns: the phase-α deployment shape and the production target. Phase β does **not** change either column — it only extends emission coverage; deployment shape is unchanged at production promotion.
 
-| Component | Purpose | Phase α (ship now) | Production steady-state target (§14) |
+**Both columns use the same single-node topology.** The production column is not a topology upgrade — it records the operational commitments that must be active at production (retention DDL, off-cluster backup, auth, sizing validation). HA is deferred and does not appear in either column.
+
+| Component | Purpose | Phase α (ship now) | Production target (§14) |
 |---|---|---|---|
-| Langfuse web | UI + REST/OTLP ingest + scores API | Stateless; 1 replica | Stateless; ≥ 2 replicas behind Service; `topologySpreadConstraints` across nodes |
-| Langfuse worker | Async ingestion, batch insert to ClickHouse, score processing | Stateless; 1 replica | Stateless; ≥ 2 replicas; drain-safe shutdown |
-| Postgres | Orgs, projects, users, API keys, datasets (config), prompts, evaluator configs | Single instance, `postgresql.architecture: standalone`, `local-path` PVC | **HA via CNPG operator** (or equivalent): primary + 1 streaming replica, WAL archiving to object store, automated failover |
-| ClickHouse | Traces, observations, scores (high-volume event data) | **Chart default 3 replicas overridden to 1 replica**; chart default does not schedule on current cluster size | ReplicatedMergeTree with ≥ 2 replicas + ClickHouse Keeper quorum (3 Keeper nodes); PVCs on replicated storage class OR per-node replicas with pod-anti-affinity |
-| Redis / Valkey | Ingestion queues, rate limits, cache | `architecture: standalone`, 1 replica | Sentinel topology (1 primary + 2 replicas + 3 Sentinel). Acceptable alternative: stay standalone if OTLP client-side retry is verified to absorb full Redis outages without span loss — decision in §14.2 |
-| MinIO | Event-level blob storage (large prompt/completion bodies exceeding inline threshold); future trace exports | Single node, standalone, `local-path` PVC | MinIO distributed mode (≥ 4 drives for erasure-coding quorum) OR external S3-compatible object store with its own replication |
+| Langfuse web | UI + REST/OTLP ingest + scores API | Stateless; 1 replica | Same: 1 replica. No HA requirement at single-node production. |
+| Langfuse worker | Async ingestion, batch insert to ClickHouse, score processing | Stateless; 1 replica | Same: 1 replica. |
+| Postgres | Orgs, projects, users, API keys, datasets (config), prompts, evaluator configs | Single instance, `postgresql.architecture: standalone`, `local-path` PVC | Same topology. **Backup active**: nightly `pg_dump` + continuous WAL archiving to off-cluster target (§9.1, §14.3). |
+| ClickHouse | Traces, observations, scores (high-volume event data) | **Chart default 3 replicas overridden to 1 replica**; chart default does not schedule on current cluster size | Same: 1 replica, `local-path`. **Backup active**: weekly `BACKUP TABLE` + nightly `BACKUP INCREMENTAL` to off-cluster target. **Retention DDL active** (§8). |
+| Redis / Valkey | Ingestion queues, rate limits, cache | `architecture: standalone`, 1 replica | Same: standalone. No backup (ephemeral queue). Loss tolerated per §9.2. |
+| MinIO | Event-level blob storage (large prompt/completion bodies exceeding inline threshold); future trace exports | Single node, standalone, `local-path` PVC | Same topology. **Off-cluster mirror active**: `mc mirror` to off-cluster target per §9.1. |
 
 ### 5.2 Why this split
 
@@ -290,17 +292,6 @@ Phase-α RPO/RTO targets are deliberately looser than the production steady-stat
 | MinIO | **Yes** | `mc mirror` to offsite target weekly | 7 days | Manual | Medium — re-sync |
 | Langfuse secrets (encryption key, NEXTAUTH secret) | **Yes** | Vault path `secret/langfuse/*` | Vault-backed | Immediate | Zero data loss; keys never leave Vault |
 
-### 9.1.1 Per-component policy — production steady-state target
-
-At the steady state, the failure mode "single-node down" must not depend on backups — HA covers that case (§14). Backups cover corruption, deletion, and catastrophic loss, and their targets tighten accordingly:
-
-| Component | Production target RPO | Production target RTO | Notes |
-|---|---|---|---|
-| Postgres | **≤ 1 min** | **≤ 5 min (automated failover); ≤ 30 min (backup restore)** | WAL streaming to HA replica for RPO; object-store WAL archive enables PITR for corruption cases |
-| ClickHouse | **≤ 1 hr** | **≤ 1 hr** | Replicated MergeTree + scheduled `BACKUP` to off-cluster target; restore tested monthly, not quarterly |
-| Redis | RPO irrelevant (ephemeral queue, re-emitted by OTLP retry) | **≤ 30 s** (Sentinel failover) | OR standalone with documented span-loss tolerance proved out; decision in §14.2 |
-| MinIO | **≤ 1 hr** | **≤ 30 min** | Distributed-mode object durability; offsite mirror for region-failure equivalent |
-| Vault-backed secrets | 0 | Vault-restart scoped | Unchanged from phase α — Vault is already HA per cluster baseline |
 
 ### 9.2 Why these RPOs
 
@@ -310,7 +301,7 @@ At the steady state, the failure mode "single-node down" must not depend on back
 
 ### 9.3 Restore rehearsal
 
-Phase α: **quarterly**, against a restore target namespace `observability-restore-test`. Production steady state: **monthly**, same target; non-completion for two consecutive months is a production incident. The rehearsal measures actual RTO, confirms MinIO → Postgres → ClickHouse restore sequencing, and validates that traces ingested post-restore correlate with the historic traces.
+**Quarterly** at both phase α and production, against a restore target namespace `observability-restore-test`. Non-completion for two consecutive quarters is a production incident. The rehearsal measures actual RTO, confirms MinIO → Postgres → ClickHouse restore sequencing, and validates that traces ingested post-restore correlate with historic traces. Monthly rehearsal is not required — it would be appropriate for an HA-with-automated-failover target but is not proportionate to a restore-from-backup model.
 
 ### 9.4 Vault dependency
 
@@ -380,17 +371,20 @@ The architecture holds until one of the following is breached:
 
 These triggers are **observed-then-act**, not pre-emptive. We do not over-provision on day one.
 
-### 11.3 What explicitly does not scale horizontally at phase α (but MUST at production steady state)
+### 11.3 What explicitly does not scale horizontally — and HA deferral
 
-This subsection is scoped to **phase α**. Every single-replica choice listed here is reversed as part of the production steady-state target in §14 — do **not** mistake "what we ship now" for "what production looks like."
+All stateful backends run single-replica in both phase α and production. This is an **explicit, accepted constraint** — not a phase-α shortcut that production is expected to fix. HA hardening is deferred (§14.4).
 
-- **ClickHouse** is single-replica in phase α. Scaling to ≥ 2 replicas without HA is an ingest-parallelism move, not a durability move; true HA requires Keeper (ClickHouse's equivalent of ZooKeeper) and is the steady-state target, not phase α.
-- **Postgres** is single-replica in phase α. Streaming replication + automated failover is the steady-state target.
-- **MinIO** is single-node in phase α. Distributed-mode MinIO (or external S3) is the steady-state target.
+- **ClickHouse** is single-replica. Scaling to ≥ 2 replicas for ingest parallelism is possible without HA; true HA (ReplicatedMergeTree + Keeper) is deferred.
+- **Postgres** is single-replica. Streaming replication + automated failover (e.g. CNPG) is deferred.
+- **MinIO** is single-node. Distributed-mode erasure coding is deferred.
+- **Redis** is standalone. Sentinel topology is deferred.
 
-### 11.4 Capacity-driven scaling path (phase α → extended phase α)
+These components fail over by restore-from-backup, not by automated replica promotion. That is the production model.
 
-Distinct from the steady-state transition (§14). If Agentopia grows to 100+ active bots **before** phase γ lands, these triggers fire inside phase α: (1) ClickHouse replica increase for ingest parallelism, (2) Postgres read replica for query load, (3) Redis sizing. None of these constitutes HA — they are load-handling steps that remain inside phase-α's single-failure-domain model. HA is achieved only at phase γ through the §14.2 component targets.
+### 11.4 Capacity-driven scaling path
+
+If Agentopia grows to 100+ active bots, these triggers fire: (1) ClickHouse replica increase for ingest parallelism, (2) Postgres read replica for query load, (3) Redis sizing. None of these constitutes HA — they are load-handling steps that remain inside the single-failure-domain model. HA — should it ever be prioritized — is a separate, future architecture decision, not a capacity-scaling step.
 
 ---
 
@@ -398,18 +392,18 @@ Distinct from the steady-state transition (§14). If Agentopia grows to 100+ act
 
 ### 12.1 SLOs
 
-Two targets per dimension: a looser **phase-α** target acceptable during initial rollout, and a tighter **production steady-state** target that promotion to production-hardened depends on. Only when steady-state targets are met for ≥ 30 continuous days does the subsystem exit draft status.
+Two targets per dimension: a looser **phase-α** target acceptable during initial rollout, and a **production (single-node)** target that promotion depends on. When production targets are met for ≥ 30 continuous days the subsystem exits draft status. There is no HA SLO target — single-node loss is an accepted outage in production.
 
-| Dimension | Phase α | Production steady state | Rationale |
+| Dimension | Phase α | Production (single-node) | Rationale |
 |---|---|---|---|
-| Langfuse web availability (ingest endpoint reachable) | **99.0%** over 30 days | **99.5%** over 30 days | Observability is not on the user critical path, but at steady state it should not be the weak link either |
+| Langfuse web availability (ingest endpoint reachable) | **99.0%** over 30 days | **99.5%** over 30 days | Observability is not on the user critical path, but in production it should not be the weak link |
 | Span ingest success rate (5xx-free over 30 days) | **99.5%** | **99.9%** | Dropped spans silently degrade investigations |
-| Ingest latency p99 (OTLP request → persisted) | **5 seconds** | **2 seconds** | Ingest is async; steady-state tightens to match HA ingest path |
-| UI query p95 (single-trace load) | **2 seconds** | **1 second** | Operator responsiveness during incidents |
-| Backup completion (Postgres nightly) | **99% of days** | **100% of days** (continuous WAL streaming at steady state) | No silent backup gaps at steady state |
-| Backup completion (ClickHouse) | **99% of weeks** (weekly full) | **99% of days** (daily incremental) | Tighter RPO (§9.1.1) |
-| Time-to-detect data loss | **< 24 hours** | **< 1 hour** | Steady state requires active ingest-health alarm, not passive daily check |
-| Single-node-loss tolerance | Outage acceptable | **Zero user-visible impact** | §14.6 invariant |
+| Ingest latency p99 (OTLP request → persisted) | **5 seconds** | **3 seconds** | Single-replica single-node target; no HA write path |
+| UI query p95 (single-trace load) | **2 seconds** | **2 seconds** | Same hardware; no improvement expected at single-node |
+| Backup completion (Postgres nightly) | **99% of days** | **99% of days** + WAL archiving to off-cluster | No silent backup gaps at production; WAL archiving is the upgrade |
+| Backup completion (ClickHouse) | **99% of weeks** (weekly full) | **99% of weeks** full + **99% of days** incremental | Tighter RPO (§9.1) |
+| Time-to-detect data loss | **< 24 hours** | **< 24 hours** | Same detection mechanism; active ingest-health alarm still target for a future improvement |
+| Single-node-loss tolerance | Outage acceptable | **Outage accepted** (node loss = recovery from backup) | Accepted risk — see §14.2 |
 
 ### 12.2 Error budget
 
@@ -461,156 +455,132 @@ When a new chart version introduces a value, the rule is:
 
 ---
 
-## 14. Production Steady-State Target Architecture
+## 14. Production Target — Single-Node, Restore-from-Backup
 
-This section consolidates every commitment that defines "production-hardened" for the observability subsystem. A reviewer can read this section alone and understand what the target state is and how far phase α is from it. Anything specified here that conflicts with a phase-α choice in §§5–13 is the target; phase α is the waiver.
+This section consolidates every commitment that defines "production" for the observability subsystem under the single-node model. A reviewer can read this section and understand what production means, what risks are accepted, and what must be true before the subsystem is promoted.
 
-### 14.1 Why this section is separate
+### 14.1 What "production" means at single-node
 
-The previous revision of this document mixed phase-α trade-offs with production target commitments in the same paragraphs, creating the risk that a single-replica / single-node choice would be read as the production target. It is not. Phase α is the pragmatic shape we ship now — on a single-node k3s cluster, with `local-path` storage, with no HA backends — because current span volume and operator count justify the simplicity. **None of those choices is the production target.** This section is the production target.
+Production for the observability subsystem does **not** mean HA, automated failover, or multi-node failure domain. It means:
 
-### 14.2 HA and replication expectations (per component)
+1. **Retention policy is enforced.** ClickHouse TTL DDL is applied and verified live. Traces are not silently accumulating without a retention bound.
+2. **Backup contract is active.** Nightly Postgres `pg_dump` + continuous WAL archiving to an off-cluster target. Weekly ClickHouse `BACKUP TABLE` + nightly incremental to the same off-cluster target. MinIO weekly `mc mirror` to off-cluster.
+3. **Off-cluster backup target is resolved.** [`agentopia-infra#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168) must be closed — "backing up a cluster to itself is not a backup."
+4. **Restore rehearsal has passed.** At least one successful end-to-end restore from the off-cluster target has been executed in `observability-restore-test` namespace, with documented RTO.
+5. **Auth is hardened.** Operator allowlist enforced; API keys for each project in Vault; project-key rotation procedure documented.
+6. **Sizing is validated.** Capacity review against §11.2 triggers has been run; no trigger is in breach.
+7. **Integration is complete.** All planes (gateway, Temporal, A2A) are emitting spans (phase β exit criterion met).
+8. **Incident runbook exists.** `docs/operations/observability-incident-response.md` exists with at least the restore sequencing procedure.
 
-Every stateful backend that holds durable data has an explicit HA requirement at the steady state. Stateless services scale horizontally; stateful services replicate.
+None of these require topology change. The deployment shape is identical at production and phase α.
 
-| Component | Steady-state HA requirement | Acceptable implementation(s) | Hard minimum |
+### 14.2 Accepted risks in single-node production
+
+These risks are **explicitly accepted** for single-node production. They are not gaps to be tracked as blockers — they are the known limitations of this target. Anyone claiming the observability subsystem is "HA" or "resilient to node loss" after promotion is misstating the state.
+
+| Risk | Accepted? | Consequence | Mitigation |
 |---|---|---|---|
-| Langfuse web | Active-active | ≥ 2 stateless replicas behind a Service, `topologySpreadConstraints` across nodes | 2 replicas |
-| Langfuse worker | Active-active | ≥ 2 stateless replicas; idempotent ingest path; drain-safe shutdown | 2 replicas |
-| Postgres | Primary + streaming replica with automated failover | CloudNativePG (CNPG) operator, or Patroni, or equivalent K8s-native Postgres HA operator | 1 primary + 1 replica |
-| ClickHouse | Replicated MergeTree with quorum coordination | ReplicatedMergeTree engine + ClickHouse Keeper (3 Keeper nodes for quorum) on separate failure domains | 2 CH replicas + 3 Keeper nodes |
-| Redis / Valkey | Sentinel-based HA **or** documented standalone waiver | Sentinel (1 primary + 2 replicas + 3 Sentinels) **or** standalone after proving OTLP client retry absorbs full outages | Decision tracked as open question §16.2 |
-| MinIO / object store | Erasure-coded quorum **or** external S3-compatible | MinIO distributed mode (≥ 4 drives across ≥ 4 hosts) **or** external S3 / compatible with provider-side replication | 4-drive distributed mode |
-| Vault (external dependency) | Already HA at cluster baseline | Unchanged | Inherits cluster baseline |
+| Node loss = full subsystem outage | **Yes** | Traces dropped during outage; OTLP clients retry but eventually give up; UI unreachable | Restore from off-cluster backup on node recovery; outage window traces are not reconstructed |
+| Disk failure = data loss up to last backup | **Yes** | Postgres: up to 15 min loss (WAL archiving). ClickHouse: up to 24 hr loss (nightly incremental). MinIO blobs: up to 7 days loss (weekly mirror) | Off-cluster backup target covers catastrophic disk failure; backup RTO ~ hours not minutes |
+| No automated failover for any backend | **Yes** | Recovery requires manual restore; operator-in-the-loop | Off-cluster backup + restore rehearsal + runbook are the recovery path |
+| Single-point-of-failure for config/auth (Postgres) | **Yes** | Losing Postgres loses API keys and project config; services emit spans but Langfuse cannot authenticate them | Postgres is backed up nightly with WAL; restore recovers config; key rotation during restore recovery is manual |
+| Redis standalone queue loss on restart | **Yes** | In-flight span batches in Redis queue at time of failure are lost; OTLP retry paths at the emitter absorb this | Accepted per §9.2 rationale |
 
-Rules that bind these choices:
+### 14.3 Backup/restore contract (primary durability mechanism)
 
-- **No "HA by backup."** A daily backup is not an HA story. HA means live replication, automated failover, no operator-in-the-loop for single-component failure.
-- **Coordination quorum is non-optional for ClickHouse.** Running ReplicatedMergeTree without a proper Keeper quorum is worse than single-replica. The choice is "1 replica, no Keeper" (phase α) or "≥ 2 replicas with 3-node Keeper" (steady state) — not a middle configuration.
-- **Stateless services scale **because they are stateless**.** A second web / worker replica without proper liveness + readiness + graceful drain is not HA.
+At production, off-cluster backup is the only durability guarantee. The backup contract must be explicitly active:
 
-### 14.3 Storage class expectations
+| Component | Backup method | Target | RPO | RTO |
+|---|---|---|---|---|
+| Postgres | Continuous WAL archiving + nightly `pg_dump` to off-cluster | Resolved per #168 | 15 min (WAL) | 30 min (restore) |
+| ClickHouse | Weekly `BACKUP TABLE` + nightly `BACKUP INCREMENTAL` to off-cluster | Same off-cluster target | 24 hr | 2 hr |
+| MinIO | Weekly `mc mirror` to off-cluster | Same off-cluster target | 7 days | Manual re-sync |
+| Redis | None (ephemeral) | N/A | N/A | N/A |
+| Langfuse secrets (encryption key, NEXTAUTH) | Vault path `secret/langfuse/*` | Vault-backed | Vault-backed | Immediate |
 
-Phase α uses `local-path` because that is what the k3s cluster ships with and because the cluster is a single node. The steady state cannot use `local-path` as its primary durable storage class for replicated databases.
+**Off-cluster backup target** is a production blocker — tracked at [`agentopia-infra#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168). This must resolve before production promotion.
 
-| Concern | Phase α | Steady-state target |
+### 14.4 HA deferral
+
+HA for any component of the observability subsystem is explicitly deferred. This is not an open question — it is a decision.
+
+| Deferred item | What it would require | Why deferred |
 |---|---|---|
-| StorageClass for Postgres PVC | `local-path` | Replicated block storage (Longhorn, OpenEBS Mayastor, Rook-Ceph block) **or** external storage with snapshot support |
-| StorageClass for ClickHouse PVC | `local-path` | Same replicated block storage — **or** per-node `local-path` PVCs with strict pod-anti-affinity across replicas (data replication done at the CH layer, not the storage layer) |
-| StorageClass for MinIO PVC | `local-path` | Per-node `local-path` with MinIO distributed-mode erasure coding across drives — this is the native MinIO HA pattern and does not require a replicated storage class |
-| StorageClass for Redis | `local-path` | `local-path` acceptable if Sentinel topology is deployed; Redis HA is a process-level concern, not a volume-level one |
+| Postgres HA (CNPG or equivalent) | Streaming replication, automated failover, ≥2 nodes | Cluster is single-node; single-node production target does not require it |
+| ClickHouse HA (ReplicatedMergeTree + Keeper) | ≥2 CH replicas + 3-node Keeper quorum, ≥3 cluster nodes | Same — cluster is single-node; adds significant operational complexity |
+| Redis Sentinel | 1 primary + 2 replicas + 3 Sentinels, ≥3 cluster nodes | Same |
+| MinIO distributed mode | ≥4 drives across ≥4 nodes | Same |
+| ≥3 worker node cluster expansion | Physical or VM provisioning | Prerequisite for any of the above; not currently planned |
 
-The **choice between replicated-storage-class HA and application-level HA** (anti-affinity + native replication) is an open question tracked in §16 — it depends on cluster operator preference and the operational maturity of available K8s-native storage operators. Both are acceptable steady states; hybrid (some components one way, some the other) is also acceptable.
+If HA is ever revisited, it requires: (a) cluster expansion to ≥3 worker nodes, (b) a new architecture decision round (this document does not pre-commit to any HA topology), and (c) updates to this document.
 
-What is **not** acceptable at steady state: putting any component's only durable copy on a single-node `local-path` volume.
+### 14.5 Promotion criteria (Draft → Accepted — production)
 
-### 14.4 Failure-domain assumptions
+This document exits "Draft" status and becomes "Accepted — production" only when **all** of the following are true:
 
-The failure domains Agentopia currently has are:
+1. Phase β exit criterion met: end-to-end trace observable in Langfuse UI spanning gateway → plugin → Temporal → A2A.
+2. Retention DDL active: ClickHouse TTL clauses applied; hot-tier coverage confirmed for ≥ 7 days.
+3. Off-cluster backup target resolved ([`#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168) closed): a real off-cluster destination for Postgres WAL, ClickHouse BACKUPs, and MinIO mirror.
+4. Backup contract active: Postgres WAL archiving continuous; ClickHouse nightly incremental running; MinIO weekly mirror running; all to the off-cluster target.
+5. Restore rehearsal passed: successful end-to-end restore from off-cluster backup in `observability-restore-test` namespace; RTO documented.
+6. Auth hardened: operator allowlist enforced; project API keys in Vault; key rotation procedure documented.
+7. Sizing validated: capacity review run against §11.2 triggers; no trigger in breach.
+8. Incident runbook exists: `docs/operations/observability-incident-response.md` with restore sequencing.
+9. §12.1 production (single-node) SLO targets met for ≥ 30 continuous days.
 
-- **Phase α:** one failure domain — the single cluster node. Any node outage is a full subsystem outage. Acceptable at phase α.
-- **Production steady state:** **node-level** failure domain. The target cluster has ≥ 3 worker nodes. Stateful replicas must be spread across nodes via `topologySpreadConstraints` or `podAntiAffinity`. Node-loss must not produce data loss.
-
-What is explicitly **out of scope** for this document's steady-state target:
-
-- **Zone-level / rack-level / region-level failure domain.** Agentopia does not currently operate across zones or regions. If that changes, the observability subsystem follows whatever cluster-level design is chosen; this document does not pre-commit to multi-zone HA.
-- **Cross-cluster replication.** MinIO offsite mirror (§9) addresses catastrophic loss; live multi-cluster replication is not a steady-state target here.
-
-### 14.5 Backup/restore target state
-
-The §9.1.1 table specifies the steady-state RPO/RTO targets. They are repeated here as the single binding reference for promotion:
-
-- **Postgres:** RPO ≤ 1 min, RTO ≤ 5 min (automated failover), RTO ≤ 30 min (PITR restore from backup).
-- **ClickHouse:** RPO ≤ 1 hr, RTO ≤ 1 hr.
-- **Redis:** RPO N/A; RTO ≤ 30 s via Sentinel failover, or standalone with proven OTLP client resilience.
-- **MinIO:** RPO ≤ 1 hr, RTO ≤ 30 min.
-- **Restore rehearsal cadence:** monthly (vs quarterly at phase α).
-
-Additionally at steady state:
-
-- **WAL archiving to object store must be continuous, not scheduled.** Missed WAL segments are an incident.
-- **Backup encryption keys** live in Vault. The restore path must be tested against a Vault-up and a Vault-recently-restored scenario.
-- **Off-cluster backup target** for ClickHouse and MinIO is non-negotiable at steady state. Backing up a cluster to itself is not a backup.
-
-### 14.6 Single-node-loss acceptability
-
-Explicit position, by state:
-
-| State | Single-node loss | User-visible impact |
-|---|---|---|
-| Phase α | **Acceptable** | Full observability subsystem outage until the node returns or is replaced. Trace ingest during the outage is dropped (OTLP clients retry but eventually give up). Post-recovery, traces from the outage window are not reconstructed. |
-| Production steady state | **NOT acceptable** | Zero user-visible impact. A single-node failure must be absorbed by HA replication (Postgres failover, ClickHouse replica takeover, MinIO drive-erasure-coding, Redis Sentinel failover, stateless-replica spread). Ingest continues; UI remains available (possibly degraded). |
-
-This row in §12.1 is the SLO formalization of the steady-state stance. Promotion to production-hardened requires demonstrating a controlled single-node drain in the steady-state deployment that produces zero user-visible impact.
-
-### 14.7 Promotion criteria (draft → accepted)
-
-This document exits "Draft" status and becomes "Accepted — production-hardened" only when **all** of the following are true:
-
-1. Phase γ deployment has landed.
-2. §14.2 HA topologies are in place for Postgres, ClickHouse, Langfuse web, Langfuse worker, and (if not waived) Redis.
-3. §14.3 storage-class choice is implemented and documented.
-4. §14.4 multi-node failure domain is in place (cluster has ≥ 3 worker nodes).
-5. §14.5 backup targets are met for ≥ 30 days continuous.
-6. §14.6 single-node-drain exercise has been executed successfully on the steady-state deployment.
-7. §12.1 production steady-state SLO targets have been met for ≥ 30 continuous days.
-8. All §16 open questions marked "blocks promotion" have been resolved.
-
-Until every item is satisfied, any document or issue claiming that observability is "production-ready" is overstating the state.
+**There is no single-node-drain exercise requirement.** That exercise tests HA; this is a single-node production model. Node loss = outage is accepted (§14.2).
 
 ---
 
 ## 15. Rollout Plan
 
-Three phases. All sit under the [`#467`](https://github.com/ai-agentopia/agentopia-protocol/issues/467) umbrella. Each ships as its own PR(s); no cross-phase bundling.
+Two phases followed by a production promotion gate. All sit under the [`#467`](https://github.com/ai-agentopia/agentopia-protocol/issues/467) umbrella. Each ships as its own PR(s); no cross-phase bundling. The deployment shape is identical across all three stages — what changes is emission coverage and operational commitments.
 
 ### Phase α — Deploy + protocol ingest (infra issue #163)
 
-Pragmatic, non-HA, single-node. Acceptable because of current volume (§11.1) and operator count.
+Single-node, single-replica, `local-path`. Acceptable because of current volume (§11.1) and operator count. Dev/staging.
 
-1. Infra PR lands the Helm Application in ArgoCD with the non-HA values from ADR-015 and §11.3.
+1. Infra PR lands the Helm Application in ArgoCD with the single-node values from ADR-015 and §11.3.
 2. Operator bootstraps organizations + projects per §7.1. **One-time manual step.**
 3. Project secret keys stored in Vault, mounted into `bot-config-api` pod.
 4. `OTEL_EXPORTER_OTLP_ENDPOINT` set on `bot-config-api` deployment — the existing groundwork (PR #487) starts ingesting.
 5. Operator validates: one RunContract construction produces one trace visible in the Langfuse UI, tagged with the right project.
 6. Retention DDL applied post-install to ClickHouse event tables per §8.1.
 
-**Exit criterion for phase α:** traces from `bot-config-api` are visible in the Langfuse UI, tagged by project, with correct `agentopia.*` attributes. **Phase α does NOT exit into production-hardened** — it exits into phase β.
+**Exit criterion for phase α:** traces from `bot-config-api` are visible in the Langfuse UI, tagged by project, with correct `agentopia.*` attributes. Phase α exits into phase β.
 
 ### Phase β — Extend emission across planes
 
-Phase-α deployment shape is unchanged. What changes is emission coverage.
+Deployment shape unchanged. What changes is emission coverage.
 
 1. `agentopia-core` gateway instrumentation lands in a core-side PR — run loop, tool boundary, LLM call, A2A / `sessions_spawn` boundaries.
 2. Temporal activity context propagation — `traceparent` extracted on workflow start, injected into outgoing activity RPCs.
 3. A2A sidecar + relay path use the already-landed `extract_traceparent` / `inject_traceparent` primitives.
 4. Operator validates: a single trace spans gateway → plugin → Temporal → A2A per the H3 acceptance bar in the implementation plan.
-5. Capacity review against §11.2 triggers. If no trigger fires, no scaling action — and no HA work.
+5. Capacity review against §11.2 triggers. If no trigger fires, no scaling action.
 
-**Exit criterion for phase β:** end-to-end trace across all planes observable in the Langfuse UI. Phase β does NOT exit into production-hardened either — it exits into phase γ.
+**Exit criterion for phase β:** end-to-end trace across all planes observable in the Langfuse UI. Phase β exits into the production promotion gate.
 
-### Phase γ — Production steady-state hardening
+### Production promotion gate — Operational hardening
 
-This is the phase the previous revision of this document left implicit. It is the transition from phase-α deployment shape to the §14 target. Non-negotiable before promotion.
+Deployment shape unchanged from phase β. This is the gate that converts dev/staging into production. Every §14.5 criterion must be satisfied:
 
-1. Cluster expansion to ≥ 3 worker nodes (infrastructure-level prerequisite, not subsystem-level).
-2. Replicated storage class chosen and deployed cluster-wide (§14.3) — OR the application-level HA path chosen instead and documented.
-3. Postgres HA operator (CNPG or equivalent) deployed; Langfuse Postgres migrated under its control.
-4. ClickHouse reconfigured to ReplicatedMergeTree + Keeper quorum.
-5. MinIO reconfigured to distributed mode (or swapped to external S3) per §14.2.
-6. Langfuse web + worker scaled to ≥ 2 replicas with topology spread.
-7. Redis HA decision executed per §16.2 outcome.
-8. SSO migration per §10.1.
-9. Backup targets tightened to §14.5; restore rehearsal cadence moves to monthly.
-10. Single-node-drain exercise per §14.6 executed; zero user-visible impact confirmed.
-11. 30-day SLO burn-in at steady-state targets (§12.1).
+1. Off-cluster backup target resolved ([`#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168) closed).
+2. Backup contract active: Postgres WAL archiving continuous; ClickHouse nightly incremental; MinIO weekly mirror — all to the off-cluster target.
+3. Restore rehearsal passed in `observability-restore-test` namespace; RTO documented.
+4. Auth hardened: operator allowlist enforced; project API keys in Vault; rotation procedure documented.
+5. Sizing validated: capacity review against §11.2 triggers; no trigger in breach.
+6. Incident runbook authored: `docs/operations/observability-incident-response.md`.
+7. 30-day SLO burn-in at production (single-node) targets per §12.1.
 
-**Exit criterion for phase γ:** all §14.7 promotion criteria met. This document moves from Draft to Accepted.
+**Exit criterion:** all §14.5 promotion criteria met. This document moves from Draft to Accepted — production (single-node).
 
 ### Deferred (explicit, across all phases)
 
 - Any ingress beyond cluster-internal.
 - `ee/` enablement.
+- HA for any backend (Postgres, ClickHouse, Redis, MinIO) — see §14.4.
+- Cluster expansion to ≥ 3 worker nodes.
 - Multi-zone / multi-region / multi-cluster architecture.
 - Eval harness (WP-H3-03) — separate rollout under issue #469.
 - Checkpoint policy integration (WP-H3-04..07) — separate rollout under #468.
@@ -621,23 +591,23 @@ This is the phase the previous revision of this document left implicit. It is th
 
 ### 16.1 Risks
 
-- **Phase α storage fragility.** ClickHouse / Postgres / MinIO on `local-path` with no replication; disk failure loses the instance. Backup mitigates but does not prevent a weekly full-backup gap. **Accepted at phase α; unacceptable at steady state** — §14 mandates the resolution.
-- **No in-cluster replication for any backend at phase α.** A single-node Kubernetes scheduler blip takes Langfuse down. Inherits the cluster-level reliability at phase α; resolved by phase γ per §14.
+- **Single-node storage fragility (accepted).** ClickHouse / Postgres / MinIO on `local-path` with no replication; disk failure loses the instance. Backup mitigates but does not prevent a backup-gap window. **This is the accepted production risk** — §14.2 documents the explicit acceptance. Recovery is restore-from-backup, not failover.
+- **No in-cluster replication for any backend.** A single-node outage takes Langfuse down. Inherits the cluster-level single-point-of-failure. **Accepted** per §14.2; HA is deferred.
 - **Langfuse ownership change (ClickHouse acquisition, 2026-01-16).** License unchanged so far. If a future release relocates features from MIT core to `ee/`, we may need to pin the last-MIT version indefinitely. Reversibility clause in ADR-015 applies.
 - **ClickHouse schema changes between Langfuse versions.** Chart upgrades run migrations automatically. A bad migration can make the backup incompatible. Mitigation: pin chart versions, test upgrades in the restore-test namespace first.
 - **Trace explosion from runaway runs.** A bot that fails R1/R2/R3 could emit thousands of spans per run. Mitigation inherits from the harness rails themselves (which already cap per-turn calls); additionally, Langfuse's per-project API rate limit caps ingest.
 - **Observability emission as a hidden dependency of startup.** The groundwork bootstrap never fails startup, but a future change could inadvertently block lifespan on the exporter. Mitigation: the emission contract §4.4 forbids this.
-- **Phase γ cluster prerequisite.** §14.4 requires ≥ 3 worker nodes. Phase γ cannot complete until cluster expansion happens. This is an infra dependency external to this subsystem and is not currently scheduled.
+- **No HA path planned.** HA hardening (CNPG, ClickHouse Keeper, Sentinel, distributed MinIO, cluster expansion) is deferred with no scheduled date. If the observability cluster node is permanently destroyed, recovery requires re-deploying from scratch plus restoring from off-cluster backup. That is the known worst-case recovery path.
 
 ### 16.2 Open questions — blocks promotion to Accepted
 
-Questions in this list must be resolved before the document exits Draft (§14.7 promotion criteria):
+Questions in this list must be resolved before the document exits Draft (§14.5 promotion criteria):
 
-1. **Storage-class choice for replicated backends.** Replicated block storage class (Longhorn / OpenEBS Mayastor / Rook-Ceph) vs application-level HA (per-node `local-path` with strict anti-affinity + backend-native replication). Cluster operator preference + operational maturity drives the call.
-2. **Redis HA vs standalone waiver.** Keep Redis standalone only if we prove, with measurements, that full Redis outages do not drop spans at the OTLP client. Otherwise Sentinel is required at steady state.
-3. **Postgres HA operator choice.** CNPG vs Patroni vs another K8s-native operator. Must be compatible with Vault-managed credentials and with the `langfuse-k8s` chart's Postgres hand-off.
-4. **Off-cluster backup target.** What specifically — another MinIO instance, an external S3 provider, cold storage? Non-negotiable at steady state; unresolved today.
-5. **Cluster expansion to ≥ 3 nodes.** Tracked outside this document but gating phase γ. Scheduled owner and target date unknown.
+1. **Off-cluster backup target** ([`#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168)). What specifically — another MinIO instance on separate hardware, an external S3-compatible provider, cold/tape storage? Non-negotiable at production; unresolved today. Until #168 is closed, promotion cannot proceed.
+2. **ClickHouse TTL implementation shape.** `TTL ... TO DISK 'cold'` (requires a dedicated cold volume class) vs `TTL ... DELETE` with the weekly export to MinIO/off-cluster. Decide at the phase-α retention DDL step; the architectural invariant is: no trace silently lost before 30 days, no trace persisting past 2 years without explicit legal hold.
+3. **Incident runbook ownership.** Who authors `docs/operations/observability-incident-response.md`, and when — before production promotion or alongside the first phase-α deploy? It must exist before promotion (§14.5 criterion 8).
+
+Note: HA-related questions (storage class, Postgres HA operator, Redis Sentinel, MinIO distributed, cluster expansion) are **not** open questions for this document — they are deferred decisions (§14.4). They do not block promotion.
 
 ### 16.3 Open questions — tracked, not blocking promotion
 
@@ -652,14 +622,16 @@ Questions in this list must be resolved before the document exits Draft (§14.7 
 - **Backend choice.** ADR-015. Do not reopen.
 - **License boundary.** MIT core only. Do not reopen.
 - **Per-project API key scope.** §10.2. Do not reopen.
-- **Single-node-loss acceptability at steady state.** §14.6. Not acceptable; do not renegotiate.
+- **Production target is single-node.** §14. HA is explicitly deferred. Do not treat HA as an implicit production expectation.
+- **Single-node-loss is accepted at production.** §14.2. Node loss = outage = restore from backup. Do not renegotiate without a separate architecture decision round.
+- **No HA blocker on promotion.** HA questions (CNPG, ClickHouse Keeper, Redis Sentinel, MinIO distributed, ≥3 node cluster) do not block document promotion. They are deferred. Do not re-add them to §16.2.
 
 ---
 
 ## 17. Final Recommendation
 
-Proceed with the three-phase rollout in §15 against the phase-α architecture in §§5–13 and the steady-state target in §14. The observability subsystem is treated as a real system — with storage classes, retention commitments, backup obligations, access boundaries, and a capacity model — rather than as a Helm chart wrapped around a product choice. Helm renders; architecture owns.
+Proceed with the two-phase rollout in §15 against the single-node architecture in §§5–13 and the production target in §14. The observability subsystem is treated as a real system — with retention commitments, backup obligations, access boundaries, and a capacity model — rather than as a Helm chart wrapped around a product choice. Helm renders; architecture owns.
 
-This document is currently **Draft**. It becomes **Accepted — production-hardened** only when the §14.7 promotion criteria are met. Until then, any external reference that calls observability "production-ready" is overstating the state; the accurate status is "phase-α design specified, steady-state target specified, promotion gated on §14.7."
+This document is currently **Draft**. It becomes **Accepted — production (single-node)** only when the §14.5 promotion criteria are met. Until then, the accurate status is: "phase-α design specified and ready to implement; production target is single-node with restore-from-backup durability; HA explicitly deferred; promotion gated on §14.5."
 
-Acceptance for this document is a dry run: a reviewer unfamiliar with Langfuse should be able to read this document plus ADR-015 and answer, without reading the chart: **"what data lives where in phase α vs at steady state, who can see it, how long does it live, who gets paged when it breaks, how does the subsystem survive single-node loss at steady state, and how do Agentopia's existing services plug in?"** If any of those questions cannot be answered from this document alone, the document is incomplete and a follow-up PR is required.
+The production target is deliberately modest: same deployment topology as phase α, operationally hardened. A reviewer unfamiliar with Langfuse should be able to read this document plus ADR-015 and answer, without reading the chart: **"what data lives where, who can see it, how long does it live, how is it backed up, what happens when the node dies, and how do Agentopia's existing services plug in?"** If any of those questions cannot be answered from this document alone, the document is incomplete and a follow-up PR is required.
