@@ -282,6 +282,8 @@ Reading notes:
 - Add `reconcile-capability` API endpoint on `bot-config-api`, modelled on the existing `reconcile-routing` endpoint. It recomputes a bot's `capabilityClass`-derived Helm values and patches the Application.
 - Emit a per-bot diagnostic during reconcile listing tools that were dropped, for operator review.
 
+> **Implementation note (H2.5):** `reconcile-capability` was not implemented as a standalone operator endpoint. `resolve_capability_class()` was folded into the existing `POST /api/v1/bots/deploy` flow instead. The class annotation and Helm values are written at deploy time; there is no separate reconcile route. The operator workflow for migration validation is `scripts/diff-tools-allow.sh` — see the [capability-class-rollout-guide](./capability-class-rollout-guide).
+
 **Phase 2.5 — `admin_mutate` audit sink.**
 Must land before `admin_mutate` is callable in any environment. Append-only gateway-owned log; retention and signing policy delivered in a follow-up ADR. Phase 2 does not close until Phase 2.5 lands.
 
