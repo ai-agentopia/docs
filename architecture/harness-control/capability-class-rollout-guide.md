@@ -13,13 +13,13 @@ title: "H2.5 Capability-Class Rollout Guide"
 
 ## Overview
 
-H2.5 replaces hand-written `tools.allow` blocks in the Helm chart with a class-driven rendering model. Each bot is assigned a `capabilityClass` value on the control plane; the chart resolves the full tool surface from that single field. No Helm values editing is needed per bot.
+H2.5 replaces hand-written `tools.allow` blocks in the Helm chart with a class-driven rendering model. Each bot is assigned a `capabilityClass` value on the control plane; the chart resolves the full tool surface from that single field.
 
 This guide covers the four-step operator workflow:
 
 1. Understand the four-rung class ladder
-2. Determine each bot's class from its current role
-3. Run shadow-diff to validate the rendered surface before enforcement
+2. Understand how `capabilityClass` is assigned during deploy
+3. Validate the rendered surface with `diff-tools-allow.sh` before enforcing
 4. Flip `strictCapabilityClass` to enforce
 
 ---
@@ -33,7 +33,7 @@ Classes are strictly cumulative. Each class adds tools on top of the class below
 | `conversant` | 8 | Answer questions using read access, retrieval, memory |
 | `worker` | 12 | Conversant + read-only domain operations (code review, QA, SA) |
 | `orchestrator` | 40 | Worker + cross-session coordination, write tools, relay/A2A/MCP |
-| `admin` | 40 | Operator surface: `admin_inspect` and `admin_mutate` only |
+| `admin` | 40 | Operator surface: `admin_inspect` and `admin_mutate` only (on top of orchestrator) |
 
 **Default for any new bot:** `conversant`. No bot auto-promotes. `admin` is opt-in by explicit control-plane annotation.
 
@@ -41,140 +41,106 @@ Full tool surface per class is defined in the baseline §8 and rendered by `agen
 
 ---
 
-## 2. Determining a Bot's Class
+## 2. How `capabilityClass` Is Assigned
 
-bot-config-api computes `capabilityClass` automatically from existing bot metadata during reconcile. The migration function `resolve_capability_class()` in `bot_config_api/domain/capability_class/migration.py` applies this mapping:
+`resolve_capability_class()` in `bot-config-api/src/domain/capability_class/migration.py` runs automatically inside the bot deploy flow (`POST /api/v1/bots/deploy`). Operators do not call it directly.
 
-| Existing `wfBridgeRoleKey` | Resolved `capabilityClass` |
+The function applies this mapping:
+
+| Explicit `capability_class` in deploy request | Resolved class |
+|---|---|
+| `"admin"` | `admin` |
+| `"orchestrator"` | `orchestrator` |
+| `"worker"` | `worker` |
+| `"conversant"` | `conversant` |
+| *(not set)* | Derived from `wfBridgeRoleKey` (see table below) |
+
+When `capability_class` is not set explicitly in the deploy request, the function falls back to `wfBridgeRoleKey`:
+
+| Existing `wfBridgeRoleKey` | Derived `capabilityClass` |
 |---|---|
 | `orchestrator` | `orchestrator` |
 | `worker` | `worker` |
 | `reviewer` | `worker` |
 | *(unset / anything else)* | `conversant` |
 
-`admin` is never derived automatically. It must be declared explicitly in the bot's config payload.
+`admin` is never derived automatically. It must be declared explicitly in the deploy request.
 
-You can inspect the resolved class for any bot via the diagnostics endpoint:
+The resolved class is written to:
+- `spec.source.helm.valuesObject.capabilityClass` in the bot's ArgoCD Application (controls chart rendering)
+- `metadata.annotations["agentopia/capability-class"]` on the Application (read-back mirror)
 
-```
-GET /api/bots/{bot_id}/capability-diagnostics
-```
-
-The response includes the resolved class, the source field (`wfBridgeRoleKey` or explicit), and the list of tools the bot will gain or lose relative to its current chart rendering.
+**When does a bot get its class set?** On next deploy or update through bot-config-api. Bots provisioned before H2.5 that have not been re-deployed still have an empty `capabilityClass` in their Application and fall back to the legacy chart path (see §3 and [tools-allow-rendering §3](./tools-allow-rendering#3-the-empty-capabilityclass-fallback-path)).
 
 ---
 
-## 3. Shadow-Diff Window
+## 3. Validating the Rendered Surface Before Enforcing
 
-Before `strictCapabilityClass` is enabled, the chart runs in shadow mode: both the hand-written allowlist and the class-driven allowlist are computed, and a diff is emitted to the bot's ArgoCD sync log. No enforcement change occurs.
+Before setting `strictCapabilityClass: true`, validate that the class-driven surface matches expectations using `scripts/diff-tools-allow.sh` from the infra repo.
 
-To inspect the diff for a specific bot without waiting for a sync cycle, use the shadow-diff script from the infra repo:
-
-**Local mode** (reads your local chart + current values):
+**Local mode** (reads your local chart and a specified class):
 
 ```bash
 ./scripts/diff-tools-allow.sh --bot <bot-name> --class <class>
 ```
 
-**Cluster mode** (reads live ArgoCD Application values):
+**Cluster mode** (reads the live ArgoCD Application values):
 
 ```bash
 ./scripts/diff-tools-allow.sh --bot <bot-name> --cluster
 ```
 
-Output format:
+Example output:
 
 ```
-BOT: <bot-name>   CLASS: worker   MODE: shadow
+BOT: delivery-bot   CLASS: orchestrator   MODE: diff
 ADDED (class-driven adds these):
-  + gov_list_issues
-  + gov_get_pr_files
+  + relay_broadcast
 REMOVED (class-driven removes these):
-  - group:sessions
-  - relay_send
-OK:  tools present in both surfaces: 14
+  - group:sessions   ← covered by named sessions_* tools in the class surface
+OK:  tools present in both surfaces: 28
 ```
 
-Tools in `REMOVED` represent capabilities the bot had via the hand-written allowlist that its class does not grant. Review each one before enforcing. If the removal is wrong, the bot's declared class may need to be raised.
+`ADDED` — tools the class grants that were not in the old hand-written list. Safe by definition.
+
+`REMOVED` — tools the old hand-written list had that the class does not grant. Review each one:
+- If the tool is legitimately required by the bot's role, raise the bot's `capabilityClass`
+- If the tool was an artifact of the flat allowlist, the removal is correct
+
+Run this for every bot before enabling `strictCapabilityClass`.
 
 ---
 
-## 4. The `reconcile-capability` Endpoint
+## 4. Cutover: Enabling `strictCapabilityClass`
 
-`bot-config-api` exposes a `reconcile-capability` endpoint modelled on the existing `reconcile-routing` endpoint. Calling it:
-
-1. Re-runs `resolve_capability_class()` for the bot
-2. Patches the bot's ArgoCD Application `valuesObject.capabilityClass`
-3. Patches the `agentopia/capability-class` annotation on the Application for read-back
-4. Emits a diagnostic listing tools added or dropped vs the previous render
-5. Returns the new class and the delta
-
-```
-POST /api/bots/{bot_id}/reconcile-capability
-```
-
-You do not need to call this manually on a normal deploy — bot-config-api calls it automatically during bot creation and update flows. Call it explicitly when:
-- You have changed a bot's declared role and want the chart to reflect the new class immediately
-- You want to inspect the delta without waiting for the next ArgoCD sync
-- You are validating a migration batch
-
----
-
-## 5. Cutover: Enabling `strictCapabilityClass`
-
-When the shadow-diff window shows no unexpected removals, enable enforcement:
-
-```yaml
-# In the bot's Helm values (via bot-config-api reconcile or direct ArgoCD patch):
-strictCapabilityClass: true
-```
+When `diff-tools-allow.sh` confirms no unexpected removals for a bot, enable enforcement by setting `strictCapabilityClass: true` in the bot's Helm values. This happens through the bot-config-api deploy flow or a targeted ArgoCD Application patch.
 
 With `strictCapabilityClass: true`:
-- The class-driven `tools.allow` surface is the only surface rendered
-- The hand-written allowlist fallback path is disabled
-- Any tool not in the class surface is blocked at the Helm rendering level, before the runtime sees it
+- Only the class-driven surface from `agentopia-bot.toolsAllow` is rendered
+- The legacy `wfBridgeRoleKey` fallback path is eliminated
+- If `capabilityClass` is empty when `strictCapabilityClass=true`, the Helm render fails with an explicit error — it does not fall back to any default
 
-**Recommended rollout order:** `conversant` bots first (smallest surface change), then `worker`, then `orchestrator`. `admin` bots should be migrated last and verified with the full Admin tool contract (see [admin-tool-contract](./admin-tool-contract)).
-
----
-
-## 6. Diagnostics Output Reference
-
-The `capability-diagnostics` endpoint and the `reconcile-capability` response both emit the same diagnostic record shape:
-
-```json
-{
-  "bot_id": "my-bot",
-  "capability_class": "worker",
-  "source": "wfBridgeRoleKey",
-  "strict_mode": false,
-  "tools_added": ["gov_list_issues", "gov_get_pr_files", "wf_status"],
-  "tools_removed": ["group:sessions", "relay_send"],
-  "tools_retained": 14,
-  "shadow_diff_available": true
-}
-```
-
-`tools_removed` lists tools the bot had in its previous allowlist that the class does not grant. These are the items to review before cutover.
+**Recommended cutover order:** `conversant` bots first (smallest surface change), then `worker`, then `orchestrator`. `admin` bots last; verify with the full Admin tool contract (see [admin-tool-contract](./admin-tool-contract)).
 
 ---
 
-## 7. Rollout Checklist
+## 5. Rollout Checklist
 
 ```
-[ ] Run capability-diagnostics for each bot in the migration batch
-[ ] Review tools_removed entries — confirm no legitimate capability loss
-[ ] Raise bot's capabilityClass if a removal is incorrect
-[ ] Run diff-tools-allow.sh --cluster to confirm shadow render matches expectations
-[ ] POST /reconcile-capability for each bot to land the capabilityClass annotation
-[ ] Enable strictCapabilityClass: true per bot (or per wave)
-[ ] Verify bot responds normally on a smoke turn after cutover
-[ ] Monitor tool_calls_per_turn metric for the class during the first 24 hours
+[ ] For each bot in the migration batch:
+    [ ] Confirm capabilityClass annotation on the ArgoCD Application
+        (re-deploy via bot-config-api if not yet set)
+    [ ] Run: ./scripts/diff-tools-allow.sh --bot <name> --cluster
+    [ ] Review REMOVED entries — no legitimate capability loss
+    [ ] Raise capabilityClass if a removal is incorrect, then re-check
+    [ ] Set strictCapabilityClass: true (via next deploy or Application patch)
+    [ ] Verify bot responds normally on a smoke turn after cutover
+[ ] Monitor first 24 hours for unexpected tool-block events
 ```
 
 ---
 
-## 8. Known Constraints and Pending Items
+## 6. Known Constraints and Pending Items
 
 | Item | Status |
 |---|---|

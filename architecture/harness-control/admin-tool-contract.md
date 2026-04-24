@@ -152,7 +152,7 @@ The enum shape is final. The handler is a stub.
 
 ## 3. Audit Record
 
-Every `admin_mutate` call emits a structured audit record, regardless of outcome (success or failure). The record shape is stable and will not change when the durable sink lands in Phase 2.5.
+Every `admin_mutate` call emits a structured audit record, regardless of outcome (success or failure). The record shape is stable.
 
 ```json
 {
@@ -167,9 +167,11 @@ Every `admin_mutate` call emits a structured audit record, regardless of outcome
 }
 ```
 
-**Current sink (Phase 2.5 pending):** Records are emitted to the subsystem log via `log.info("ADMIN_MUTATE_AUDIT ...")`. The JSON shape is identical to what the durable sink will read.
+**Current emit path:** Records are emitted to the agentopia-core subsystem log via `log.info("ADMIN_MUTATE_AUDIT ...")`. The JSON shape is stable and is the same shape the durable sink will ingest.
 
-**Phase 2.5 gate:** A gateway-owned append-only durable audit sink must be live before `admin_mutate` is callable in any production environment. This gate is tracked in [`agentopia-protocol#477`](https://github.com/ai-agentopia/agentopia-protocol/issues/477). Until `#477` closes, `admin_mutate` is available only in development and staging environments where audit log completeness is not a compliance requirement.
+**Durable sink (protocol side — landed):** `bot-config-api` exposes an append-only audit endpoint at `POST /api/v1/admin/audit/records` (router: `admin_audit.py`, mounted in H2.5). The endpoint enforces actor-binding rules (actor must have an active RoleRegistry binding and `actor_capability_class` must be `"admin"`). Read access is at `GET /api/v1/admin/audit/records`. Liveness is at `GET /api/v1/admin/audit/status`.
+
+**Gap tracked in `#477`:** The agentopia-core `admin_mutate` handler does not yet call the protocol-side sink — it only logs locally. `#477` wires the core handler to `POST /api/v1/admin/audit/records`. Until `#477` closes, the audit trail is subsystem-log-only, and `admin_mutate` must not be used in any production environment where a durable audit trail is required.
 
 A new mutation shape is added by introducing a new enum value and a dedicated audit event type — never by relaxing the cap or extending the flat schema with free-form fields.
 
@@ -203,7 +205,8 @@ Do not extend the R1 cap or change the flat schema shape (no `anyOf`/`oneOf`). T
 | `admin_mutate` — `clear_provider_usage_cache` | ⏳ | Handler + durable cache API (#477) |
 | `admin_mutate` — `invalidate_session_memory_cache` | ⏳ | Handler + gateway cache eviction (#477) |
 | Audit record shape | ✅ (stable) | — |
-| Durable audit sink (gateway-owned, append-only) | ⏳ | #477 — gates production use of `admin_mutate` |
+| Durable audit sink — protocol side (`POST /api/v1/admin/audit/records`) | ✅ landed in H2.5 | — |
+| Core → protocol sink wiring (`admin_mutate` calls the endpoint) | ⏳ | #477 — gates production use of `admin_mutate` |
 
 ---
 
