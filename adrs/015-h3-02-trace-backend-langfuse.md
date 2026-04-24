@@ -114,13 +114,13 @@ These are binding on the infra rollout PR and must be reflected in the ArgoCD Ap
 3. **Right-sized subcharts for k3s:**
    - `clickhouse.replicaCount: 1` (default is 3; will not schedule on our cluster otherwise).
    - `redis.architecture: standalone` (no sentinel).
-   - `postgresql.architecture: standalone`.
+   - ~~`postgresql.architecture: standalone`~~ — **superseded 2026-04-24**: `postgresql.enabled: false`. Langfuse uses the cluster shared system Postgres with a dedicated `langfuse` database and `langfuse_app` role. DSN from Vault at `secret/langfuse/postgres-dsn`. See [H3 Observability Production Design §5.4](../architecture/harness-control/h3-observability-production-design.md) for the full boundary spec.
    - `s3.deploy: true` with MinIO standalone (no distributed mode).
-   - Storage: all PVCs use the cluster default `local-path`.
+   - Storage: ClickHouse, Redis, MinIO PVCs use the cluster default `local-path`. No Postgres PVC (external).
 4. **Namespace:** deploy into the existing `agentopia` namespace (per CLAUDE.md rule: only touch this namespace).
 5. **Ingress:** Traefik (no ALB). Internal-only at first; no public ingress.
 6. **Ingest URL:** expose `/api/public/otel` via cluster-internal Service. Do NOT expose externally in this phase.
-7. **Secrets:** all database passwords and S3 keys via K8s Secrets sourced from Vault where possible. Auto-generated secrets from the chart are acceptable for non-prod.
+7. **Secrets:** Postgres DSN is Vault-managed (`secret/langfuse/postgres-dsn`) — not chart-generated. ClickHouse + MinIO passwords may be chart-generated on first install for non-prod; Langfuse encryption key and NEXTAUTH secret are Vault-managed. See [production design §10.4](../architecture/harness-control/h3-observability-production-design.md) for the full secret surface.
 
 ## Protocol-side implications
 
