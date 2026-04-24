@@ -213,13 +213,26 @@ GRANT CONNECT ON DATABASE langfuse TO langfuse_app;
 
 `langfuse_app` has no access to other databases on the shared Postgres. It is not a superuser. It cannot create roles or alter system-level settings. Connection-level permissions are scoped to the `langfuse` database only.
 
-**Vault-managed DSN.** The full database connection string is stored as a single opaque secret at Vault path `secret/langfuse/postgres-dsn`. Its value is:
+**Vault-managed DSN (source of truth).** The full database connection string is stored as a single opaque secret at Vault path `secret/langfuse/postgres-dsn`. Its value is:
 
 ```
-postgres://langfuse_app:<password>@<shared-postgres-service>.<namespace>.svc.cluster.local:5432/langfuse?sslmode=require
+postgres://langfuse_app:<percent-encoded-password>@<shared-postgres-service>.<namespace>.svc.cluster.local:5432/langfuse
 ```
 
-Langfuse web and worker receive this via the same Vault init-container pattern used by other Agentopia services — the DSN is written to an env file before the main process starts. The password is **never** chart-generated and is **never** stored in a K8s Secret directly. Rotation is: update `secret/langfuse/postgres-dsn` in Vault → restart Langfuse web + worker pods. No chart re-render required.
+(The `?sslmode=require` suffix is opt-in via `POSTGRES_TLS=true` when the shared system Postgres has TLS enabled. As of the current deployment, TLS is off on the shared instance, so the DSN omits the suffix.)
+
+**Runtime consumption (operator-managed K8s Secret mirror — Langfuse-specific exception).** Langfuse web and worker do **not** read the DSN directly from Vault at pod startup. Instead:
+
+- The seed script (`agentopia-infra/scripts/seed-langfuse-vault.sh`) writes the DSN to both targets:
+  1. **Vault KV at `secret/langfuse/postgres-dsn`** — the source of truth. No other writer.
+  2. **K8s Secret `langfuse-postgres-dsn`** in the Langfuse namespace — an operator-refreshed mirror, annotated with `agentopia/vault-path=secret/data/langfuse/postgres-dsn` for provenance audit.
+- The Langfuse Helm values reference the mirror via `langfuse.additionalEnv[DATABASE_URL].valueFrom.secretKeyRef → langfuse-postgres-dsn/DATABASE_URL`.
+- **Why this exception exists:** Langfuse validates `process.env.DATABASE_URL` at container startup, **before** Next.js / the worker's `dotenv.config()` has a chance to load `.env.local` / `.env` files. The previously-planned pattern — a Vault init container writing `DATABASE_URL=...` to an emptyDir file mounted via `subPath` at `/app/.env.local` — satisfies the application after Next.js reads dotenv, but the bootstrap check fails first, putting the pods into CrashLoopBackOff. The Langfuse chart exposes no command/args override that would let us wrap the entrypoint with a `source /vault-secrets/env && exec ...` shim (the pattern used by the Agentopia gateway image).
+- **Scope of the exception:** this is a Langfuse runtime constraint driven by the upstream image's startup order. It is **not** a general reversal of the broader secret boundary principle. Other Agentopia services that control their own image (`agentopia-gateway`, `bot-config-api`, `mem0-api`, etc.) continue to read directly from Vault via in-image entrypoint shims — no K8s Secret mirror is used for them.
+- **Rotation:** re-run `seed-langfuse-vault.sh` (updates both targets atomically from the same run) → `kubectl rollout restart deploy/langfuse-web deploy/langfuse-worker`. No chart re-render required.
+- **Future:** if [External Secrets Operator](https://external-secrets.io) (or an equivalent) is adopted, the mirror step here is replaced by an `ExternalSecret` resource with no change to the Langfuse Application. The Vault path remains the source of truth either way.
+
+The password itself is **never** chart-generated. The K8s Secret `langfuse-postgres-dsn` is **only** ever written by the seed script, sourcing from Vault; nothing hand-creates or hand-edits it.
 
 **Migration ownership.** Langfuse runs its own Prisma migrations against the `langfuse` database at container startup (executed by the `langfuse-worker` init step). Agentopia infra does **not** apply or manage Langfuse migrations. Migrations are:
 - Scoped entirely to the `langfuse` database — no cross-database effects
@@ -237,9 +250,9 @@ Langfuse web and worker receive this via the same Vault init-container pattern u
 
 | Old assumption | Corrected model |
 |---|---|
-| `postgresql.enabled: true` in chart | `postgresql.enabled: false` |
-| Chart manages Postgres pod + PVC + passwords | Infra manages `langfuse` DB + role creation; Vault manages DSN |
-| Postgres password is a chart-generated K8s Secret | DSN is a Vault-managed secret at `secret/langfuse/postgres-dsn` |
+| `postgresql.deploy: true` in chart | `postgresql.deploy: false` (the actual chart flag on `langfuse/langfuse-k8s` — earlier docs said `enabled` by mistake) |
+| Chart manages Postgres pod + PVC + passwords | Infra manages `langfuse` DB + role creation; Vault stores DSN; operator-managed K8s Secret mirror feeds it to Langfuse at runtime |
+| Postgres password is a chart-generated K8s Secret | DSN is a Vault-managed secret at `secret/langfuse/postgres-dsn`; the K8s Secret `langfuse-postgres-dsn` is a Vault-sourced mirror, not a hand-managed password store |
 | Postgres backup is a Langfuse subchart concern | Backup covered by shared system Postgres WAL archiving |
 | Postgres HA is a Langfuse decision (CNPG etc.) | Postgres HA is the shared system's concern, not this subsystem's |
 
@@ -388,7 +401,7 @@ Backup encryption keys live in Vault under `secret/langfuse/*`. Restore requires
 | Langfuse encryption key | Vault `secret/langfuse/encryption-key` | Langfuse web + worker |
 | Langfuse NEXTAUTH secret | Vault `secret/langfuse/nextauth` | Langfuse web |
 | Project secret API keys | Vault `secret/langfuse/<project>-secret-key` | Each Agentopia emitter service |
-| **Langfuse Postgres DSN** | **Vault `secret/langfuse/postgres-dsn`** (full DSN string) | Langfuse web + worker (via Vault init-container) |
+| **Langfuse Postgres DSN** | **Vault `secret/langfuse/postgres-dsn`** (full DSN string — source of truth). Operator-managed K8s Secret `langfuse-postgres-dsn` is a Vault-sourced mirror; Langfuse reads it via `additionalEnv[DATABASE_URL].secretKeyRef`. Narrow exception, see §5.4. | Langfuse web + worker |
 | ClickHouse password | Chart-generated on first install, stored in K8s Secret | Langfuse web + worker internally |
 | MinIO access key + secret | Chart-generated on first install, stored in K8s Secret | Langfuse web + worker internally |
 
@@ -596,8 +609,10 @@ Two phases followed by a production promotion gate. All sit under the [`#467`](h
 
 Single-node, single-replica, `local-path`. Acceptable because of current volume (§11.1) and operator count. Dev/staging.
 
+**Status (2026-04-24): deployed and running in `agentopia-dev`.** Issues [`#170`](https://github.com/ai-agentopia/agentopia-infra/issues/170) and [`#163`](https://github.com/ai-agentopia/agentopia-infra/issues/163) are closed. The eight Langfuse pods (web, worker, ClickHouse shard0, Redis primary, MinIO, three Zookeeper) are Ready; `/api/public/health` returns `{status:OK, version:3.169.0}`. During the first sync of #163, the Vault-init + emptyDir `.env.local` approach failed because Langfuse validates `process.env.DATABASE_URL` before dotenv loads; the deployed runtime uses the operator-managed K8s Secret mirror described in §5.4. Phase β has not started.
+
 1. External Postgres boundary set up ([`#170`](https://github.com/ai-agentopia/agentopia-infra/issues/170)): `langfuse` database created on shared Postgres, `langfuse_app` role created, DSN written to Vault at `secret/langfuse/postgres-dsn`. **Prerequisite for step 2.**
-2. Infra PR lands the Helm Application in ArgoCD with the single-node values from ADR-015 and §11.3. `postgresql.enabled: false`; chart reads DSN from Vault. ClickHouse, Redis, MinIO deployed as Langfuse subcharts on `local-path`.
+2. Infra PR lands the Helm Application in ArgoCD with the single-node values from ADR-015 and §11.3. `postgresql.deploy: false`; DSN source of truth is Vault, runtime consumption via operator-managed K8s Secret mirror (see §5.4). ClickHouse, Redis, MinIO deployed as Langfuse subcharts on `local-path`.
 3. Operator bootstraps organizations + projects per §7.1. **One-time manual step.**
 4. Project secret keys stored in Vault, mounted into `bot-config-api` pod.
 5. `OTEL_EXPORTER_OTLP_ENDPOINT` set on `bot-config-api` deployment — the existing groundwork (PR #487) starts ingesting.
