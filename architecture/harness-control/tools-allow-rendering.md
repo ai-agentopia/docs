@@ -133,15 +133,43 @@ The infra repo ships `scripts/diff-tools-allow.sh` to compare what the class-dri
 
 ---
 
-## 6. Helm Unit Tests
+## 6. Chart Rendering Tests
 
-The chart ships 61 Helm unit tests that assert the exact tool surface rendered for each class. If you modify `_helpers.tpl`, run:
+The chart ships a bash test suite at `charts/agentopia-bot/tests/test_capability_class_rendering.sh`. It drives `helm template` directly and asserts the exact tool surface for each class. Run it from the infra repo root:
 
 ```bash
-helm unittest charts/agentopia-bot
+bash charts/agentopia-bot/tests/test_capability_class_rendering.sh
 ```
 
-All 61 tests must pass. A test failure means the rendered surface diverges from the approved baseline. Do not ship a rendering change that breaks these tests.
+Pass output:
+
+```
+Testing conversant class...
+Testing worker class...
+Testing orchestrator class...
+Testing admin class...
+Testing migration fallback (empty capabilityClass)...
+Testing strictCapabilityClass behavior...
+
+=== Chart template test results ===
+PASSED: 61
+FAILED: 0
+All chart template tests passed.
+```
+
+On any failure the script exits 1 and prints the failing assertions:
+
+```
+=== Chart template test results ===
+PASSED: 59
+FAILED: 2
+
+  FAIL [admin/admin-inspect]: expected 'admin_inspect' in allow list
+  FAIL [strict-parity-worker]: strict vs non-strict with same class must be identical
+
+```
+
+If you modify `_helpers.tpl`, run this suite before pushing. A failure means the rendered surface diverges from the approved baseline.
 
 ---
 
