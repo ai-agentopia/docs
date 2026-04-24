@@ -5,7 +5,7 @@ title: "H3 Observability — Production Design"
 # H3 Observability — Production Design
 
 **Status:** **Draft.** Phase-α deployment shape is specified and ready to implement. Production target is single-node (same deployment shape as phase α), with off-cluster backup/restore as the primary durability strategy. Single-node loss is an accepted outage at production. HA is explicitly deferred. Promotion criteria are in §14.5. Promotion is tracked at [ai-agentopia/docs#34](https://github.com/ai-agentopia/docs/issues/34).
-**Date:** 2026-04-23 (revised 2026-04-24 — HA target removed; production = single-node + backup contract)
+**Date:** 2026-04-23 (revised 2026-04-24 — HA target removed; production = single-node + backup contract; 2026-04-24 — Postgres model fixed: external shared system Postgres, not subchart)
 **Owner:** Platform Architecture
 **Scope:** Design of the Agent Harness trace/eval subsystem in two explicitly separated architecture states — the phase-α deployment shape (dev/staging) and the production target (single-node, restore-from-backup, operationally hardened).
 **Binding inputs:**
@@ -31,7 +31,7 @@ This document intentionally specifies **two** architecture states, not one:
 
 ## 1. Executive Summary
 
-The Agent Harness emits OpenInference-tagged OTLP spans keyed to a single `RunContract` envelope. ADR-015 selected **Langfuse (MIT core)** as the self-hosted trace/eval backend. This document turns that selection into a two-state service design: a phase-α deployment shape we can land now, and a production steady-state target architecture we commit to reaching before the subsystem is considered production-hardened.
+The Agent Harness emits OpenInference-tagged OTLP spans keyed to a single `RunContract` envelope. ADR-015 selected **Langfuse (MIT core)** as the self-hosted trace/eval backend. This document turns that selection into a two-state service design: a phase-α deployment shape we can land now, and a production target (same single-node topology, operationally hardened) we commit to before calling the subsystem production-ready.
 
 The observability subsystem is not a Helm chart. It is a contract with four parts: (1) a storage topology whose components each serve a distinct data class; (2) a tenancy model that maps Langfuse's organization/project primitives onto Agentopia's capability-class and lane structure; (3) an integration surface that every Agentopia plane — control-plane, autonomous-plane, deterministic spine, A2A threads — plugs into through the same `RunContract` identity; and (4) an operational model with explicit retention, backup, and SLO commitments. Helm renders the deployment; it does not own any of the four parts above.
 
@@ -120,7 +120,7 @@ flowchart TB
     A2A -->|spans| OTLP
     OTLP -->|HTTP| LF["Langfuse\nweb + worker"]
     LF --> CH["ClickHouse\n(traces, observations, scores)"]
-    LF --> PG["Postgres\n(orgs, projects, keys, evaluators)"]
+    LF --> PG["Shared system Postgres\nlangfuse DB + langfuse_app role\n(orgs, projects, keys, evaluators)"]
     LF --> S3["MinIO\n(event-level blobs)"]
     LF --> RD["Redis/Valkey\n(queues, rate limit)"]
 ```
@@ -166,17 +166,18 @@ Two columns: the phase-α deployment shape and the production target. Phase β d
 
 | Component | Purpose | Phase α (ship now) | Production target (§14) |
 |---|---|---|---|
-| Langfuse web | UI + REST/OTLP ingest + scores API | Stateless; 1 replica | Same: 1 replica. No HA requirement at single-node production. |
+| Langfuse web | UI + REST/OTLP ingest + scores API | Stateless; 1 replica | Same: 1 replica. |
 | Langfuse worker | Async ingestion, batch insert to ClickHouse, score processing | Stateless; 1 replica | Same: 1 replica. |
-| Postgres | Orgs, projects, users, API keys, datasets (config), prompts, evaluator configs | Single instance, `postgresql.architecture: standalone`, `local-path` PVC | Same topology. **Backup active**: nightly `pg_dump` + continuous WAL archiving to off-cluster target (§9.1, §14.3). |
-| ClickHouse | Traces, observations, scores (high-volume event data) | **Chart default 3 replicas overridden to 1 replica**; chart default does not schedule on current cluster size | Same: 1 replica, `local-path`. **Backup active**: weekly `BACKUP TABLE` + nightly `BACKUP INCREMENTAL` to off-cluster target. **Retention DDL active** (§8). |
-| Redis / Valkey | Ingestion queues, rate limits, cache | `architecture: standalone`, 1 replica | Same: standalone. No backup (ephemeral queue). Loss tolerated per §9.2. |
-| MinIO | Event-level blob storage (large prompt/completion bodies exceeding inline threshold); future trace exports | Single node, standalone, `local-path` PVC | Same topology. **Off-cluster mirror active**: `mc mirror` to off-cluster target per §9.1. |
+| Postgres | Orgs, projects, users, API keys, datasets (config), prompts, evaluator configs | **External: shared system Postgres.** `postgresql.enabled: false` in chart. Dedicated `langfuse` database + `langfuse_app` role. DSN from Vault. See §5.4 for the full boundary spec. | Same — no topology change. **Backup: covered by shared system Postgres WAL archiving.** See §9.1 and §14.3. |
+| ClickHouse | Traces, observations, scores (high-volume event data) | Standalone; **chart default 3 replicas overridden to 1**; `local-path` PVC | Same: 1 replica, `local-path`. **Backup active**: weekly `BACKUP TABLE` + nightly `BACKUP INCREMENTAL` to off-cluster target. **Retention DDL active** (§8). |
+| Redis / Valkey | Ingestion queues, rate limits, cache | Standalone; 1 replica; `local-path` PVC | Same: standalone. No backup (ephemeral queue). Loss tolerated per §9.2. |
+| MinIO | Event-level blob storage (large prompt/completion bodies exceeding inline threshold); future trace exports | Standalone; `local-path` PVC | Same topology. **Off-cluster mirror active**: `mc mirror` to off-cluster target per §9.1. |
 
 ### 5.2 Why this split
 
 - Langfuse's schema separation between Postgres (transactional / configuration) and ClickHouse (append-only event) is load-bearing. **Do not collapse these** into a single backend even if operationally tempting; doing so erases the performance characteristics the backend was designed around.
-- ClickHouse is the single heavy tenant. It is the dominant disk consumer, the slowest to back up, and the likely source of operational incidents. Sizing and monitoring attention concentrates here.
+- **Postgres is external.** It is the shared system Postgres, not a Langfuse subchart pod. See §5.4 for the exact boundary (dedicated database, dedicated role, Vault DSN). This means Postgres PVC, Postgres pod, and Postgres subchart lifecycle are **not** Langfuse's operational surface — they belong to the shared system.
+- ClickHouse is the single heavy tenant within Langfuse's own deployment. It is the dominant disk consumer, the slowest to back up, and the likely source of operational incidents on the Langfuse side. Sizing and monitoring attention concentrates here.
 - Redis is ephemeral. No backup target. Loss of Redis drops the current queue window but does not lose committed traces.
 - MinIO is the escape hatch for data that doesn't belong in either relational or column-store backends. Agentopia uses it for large payload blobs; long-term, it also holds retention-exported ClickHouse parts (see §8).
 
@@ -187,12 +188,62 @@ flowchart LR
     CLIENT["Agentopia services\nOTLP/HTTP"] --> WEB["Langfuse web\n(stateless)"]
     WEB -->|ingest| WORKER["Langfuse worker\n(stateless)"]
     WORKER -->|events| CH[("ClickHouse\ntraces / observations / scores")]
-    WEB -->|config + auth| PG[("Postgres\norgs / projects / keys")]
+    WEB -->|config + auth| PG[("Shared system Postgres\n'langfuse' DB / langfuse_app role\norgs / projects / keys")]
     WEB -->|queue| RD[("Redis")]
     WORKER -->|queue| RD
     WORKER -->|large blobs| S3[("MinIO")]
     WEB -->|blob refs| S3
 ```
+
+### 5.4 External Postgres boundary
+
+Langfuse's Postgres dependency is satisfied by the **cluster-level shared system Postgres** — the same Postgres instance used by other Agentopia services. Langfuse does **not** deploy its own Postgres pod or PVC. In Helm chart terms: `postgresql.enabled: false`; Langfuse connects via an external DSN.
+
+The boundary is defined by four invariants an infra engineer can implement without ambiguity:
+
+**Database isolation.** A dedicated PostgreSQL database named `langfuse` is created within the shared Postgres instance. No other Agentopia service's tables live in this database. Cross-service joins do not happen at the database layer — each service's data lives in its own named database.
+
+**Role isolation.** A dedicated Postgres role `langfuse_app` is created with minimum required privileges:
+
+```sql
+CREATE ROLE langfuse_app WITH LOGIN PASSWORD '<vault-managed-password>';
+CREATE DATABASE langfuse OWNER langfuse_app;
+GRANT CONNECT ON DATABASE langfuse TO langfuse_app;
+```
+
+`langfuse_app` has no access to other databases on the shared Postgres. It is not a superuser. It cannot create roles or alter system-level settings. Connection-level permissions are scoped to the `langfuse` database only.
+
+**Vault-managed DSN.** The full database connection string is stored as a single opaque secret at Vault path `secret/langfuse/postgres-dsn`. Its value is:
+
+```
+postgres://langfuse_app:<password>@<shared-postgres-service>.<namespace>.svc.cluster.local:5432/langfuse?sslmode=require
+```
+
+Langfuse web and worker receive this via the same Vault init-container pattern used by other Agentopia services — the DSN is written to an env file before the main process starts. The password is **never** chart-generated and is **never** stored in a K8s Secret directly. Rotation is: update `secret/langfuse/postgres-dsn` in Vault → restart Langfuse web + worker pods. No chart re-render required.
+
+**Migration ownership.** Langfuse runs its own Prisma migrations against the `langfuse` database at container startup (executed by the `langfuse-worker` init step). Agentopia infra does **not** apply or manage Langfuse migrations. Migrations are:
+- Scoped entirely to the `langfuse` database — no cross-database effects
+- Idempotent (`prisma migrate deploy` is safe to re-run on any restart)
+- Version-pinned: chart version upgrades may introduce new migrations; this is expected. Pin chart versions; test migrations in `observability-restore-test` namespace before applying to production.
+
+**Backup and restore implications.** The `langfuse` database is included in the shared system Postgres WAL archiving and backup schedule. There is no separate Langfuse-specific Postgres backup mechanism:
+
+- The shared Postgres backup must be confirmed operational before observability production promotion (§14.5 criterion 4 — "Backup contract active" — explicitly includes Postgres WAL archives as part of the shared system backup).
+- A Langfuse-only point-in-time restore can be performed by restoring the `langfuse` database from the shared WAL stream or a named database dump — it does not require restoring all service databases simultaneously.
+- After any Postgres restore, Langfuse pods must be restarted after confirming: (a) the `langfuse` database is present, (b) the `langfuse_app` role exists with correct grants, (c) Langfuse migration state matches the deployed chart version (re-run `prisma migrate deploy` if uncertain).
+- Connection pool sizing: confirm that `max_connections` on the shared Postgres has headroom for Langfuse web + worker connection pools on top of existing service connections. This is a one-time pre-deploy check.
+
+**What "external Postgres" changes about the deployment:**
+
+| Old assumption | Corrected model |
+|---|---|
+| `postgresql.enabled: true` in chart | `postgresql.enabled: false` |
+| Chart manages Postgres pod + PVC + passwords | Infra manages `langfuse` DB + role creation; Vault manages DSN |
+| Postgres password is a chart-generated K8s Secret | DSN is a Vault-managed secret at `secret/langfuse/postgres-dsn` |
+| Postgres backup is a Langfuse subchart concern | Backup covered by shared system Postgres WAL archiving |
+| Postgres HA is a Langfuse decision (CNPG etc.) | Postgres HA is the shared system's concern, not this subsystem's |
+
+The wiring of the external DSN is tracked at [`agentopia-infra#170`](https://github.com/ai-agentopia/agentopia-infra/issues/170) (create `langfuse` database, `langfuse_app` role, Vault secret, chart config). This is a prerequisite for [`#163`](https://github.com/ai-agentopia/agentopia-infra/issues/163).
 
 ---
 
@@ -280,22 +331,22 @@ The TTL values above are the architectural targets; the Helm chart does not set 
 
 ## 9. Backup and Restore
 
-### 9.1 Per-component policy — phase α
+### 9.1 Per-component backup policy
 
-Phase-α RPO/RTO targets are deliberately looser than the production steady-state target; they reflect "observability is not on the user critical path at current volume" and will tighten in phase γ (§14.5).
+These RPO/RTO targets apply to both phase α and production (same single-node topology). The targets are intentionally modest — observability is not on the user critical path, and restore-from-backup is the durability model.
 
-| Component | Backed up? | Method (phase α) | RPO | RTO | Restore cost |
+| Component | Backed up? | Method | RPO | RTO | Restore cost |
 |---|---|---|---|---|---|
-| Postgres | **Yes** | `pg_dump` nightly + WAL archiving to MinIO | 15 min (WAL) | 30 min | Low — standard restore |
-| ClickHouse | **Yes** | `BACKUP TABLE` to MinIO weekly + `BACKUP INCREMENTAL` nightly | 24 hr | 2 hr | Medium — depends on data volume |
-| Redis | **No** | — | N/A | N/A | Queue state is rebuilt from next-day traffic |
-| MinIO | **Yes** | `mc mirror` to offsite target weekly | 7 days | Manual | Medium — re-sync |
-| Langfuse secrets (encryption key, NEXTAUTH secret) | **Yes** | Vault path `secret/langfuse/*` | Vault-backed | Immediate | Zero data loss; keys never leave Vault |
+| Postgres (`langfuse` database) | **Yes — covered by shared system Postgres backup** | WAL archiving via shared system Postgres backup job (continuous); `pg_dump` of the `langfuse` database as part of shared nightly dump | 15 min (WAL) | 30 min (database-level restore) | Low — standard restore of named database |
+| ClickHouse | **Yes** | `BACKUP TABLE` to off-cluster target weekly + `BACKUP INCREMENTAL` nightly | 24 hr | 2 hr | Medium — depends on data volume |
+| Redis | **No** | — | N/A | N/A | Queue state rebuilt from next-day traffic |
+| MinIO | **Yes** | `mc mirror` to off-cluster target weekly | 7 days | Manual | Medium — re-sync |
+| Langfuse secrets (encryption key, NEXTAUTH secret, Postgres DSN) | **Yes** | Vault path `secret/langfuse/*` | Vault-backed | Immediate | Zero data loss; secrets never leave Vault |
 
 
 ### 9.2 Why these RPOs
 
-- Postgres is the RBAC and configuration source of truth. Losing 15 minutes of config changes is tolerable; losing 24 hours means re-adding API keys manually. The WAL-archiving target keeps the second case out.
+- The `langfuse` database on the shared Postgres is the RBAC and configuration source of truth for Langfuse. Losing 15 minutes of config changes is tolerable; losing 24 hours means re-adding API keys manually. The shared system WAL-archiving keeps the second case out. The backup obligation is inherited from the shared system — Langfuse does not need a separate Postgres backup mechanism, but the shared system backup must be confirmed active (§14.5 criterion 4).
 - ClickHouse is event data, append-only. A 24-hour gap loses one day of traces but does not corrupt existing traces. Traces are not a critical path to user-facing function; a 24 hour RPO is the right economic trade-off.
 - Redis is pure queue. Its RPO is **irrelevant** — any in-flight span batches lost on Redis failure are re-emitted by the client's retry path (OTLP clients default to exponential retry on 5xx).
 
@@ -327,7 +378,7 @@ Backup encryption keys live in Vault under `secret/langfuse/*`. Restore requires
 ### 10.3 Network policy
 
 - Ingress: NetworkPolicy allows traffic to Langfuse web pod only from (a) operator VPN range, (b) in-cluster services that emit traces.
-- Egress from Langfuse: allowed to its own Postgres/ClickHouse/Redis/MinIO; denied to the public internet by default (no outbound LLM calls, no webhook exports without explicit policy grant).
+- Egress from Langfuse: allowed to (a) the shared system Postgres service on port 5432, scoped to the `langfuse` database via the `langfuse_app` role; (b) ClickHouse, Redis, MinIO pods in the same namespace. Denied to the public internet by default (no outbound LLM calls, no webhook exports without explicit policy grant).
 - OTLP ingest endpoint (`/api/public/otel`) is **cluster-internal only**. Services resolve it via `http://langfuse-web.agentopia.svc.cluster.local:3000/api/public/otel`.
 
 ### 10.4 Secret surfaces
@@ -337,7 +388,9 @@ Backup encryption keys live in Vault under `secret/langfuse/*`. Restore requires
 | Langfuse encryption key | Vault `secret/langfuse/encryption-key` | Langfuse web + worker |
 | Langfuse NEXTAUTH secret | Vault `secret/langfuse/nextauth` | Langfuse web |
 | Project secret API keys | Vault `secret/langfuse/<project>-secret-key` | Each Agentopia emitter service |
-| Postgres / ClickHouse / MinIO passwords | Chart-generated on first install, stored in K8s Secrets | Langfuse web + worker internally |
+| **Langfuse Postgres DSN** | **Vault `secret/langfuse/postgres-dsn`** (full DSN string) | Langfuse web + worker (via Vault init-container) |
+| ClickHouse password | Chart-generated on first install, stored in K8s Secret | Langfuse web + worker internally |
+| MinIO access key + secret | Chart-generated on first install, stored in K8s Secret | Langfuse web + worker internally |
 
 ---
 
@@ -354,7 +407,7 @@ Estimated span volume at current bot count:
 - Observations per span: ~1.5 (some spans have no observation; some have several)
 - **Daily observation ingest: ~45k**
 
-This fits comfortably in a single-replica ClickHouse + single-replica Postgres on `local-path` storage.
+This fits comfortably in a single-replica ClickHouse on `local-path` storage + the shared system Postgres (Langfuse adds a small connection pool to an existing shared instance; at current volume the shared Postgres is not a capacity bottleneck).
 
 ### 11.2 Capacity triggers
 
@@ -364,7 +417,7 @@ The architecture holds until one of the following is breached:
 |---|---|---|
 | Sustained daily span ingest | 500k | Raise ClickHouse replicas to 2 (no HA, but parallel ingest) |
 | ClickHouse disk usage | 85% of PVC | Extend PVC or tighten hot-tier TTL |
-| Postgres row count on high-churn tables | 10M | Review indexing; no replica change needed yet |
+| Shared Postgres connection count (Langfuse pool) | 80% of `max_connections` headroom | Review connection pool settings; no schema change needed |
 | Redis sustained memory | 80% of `maxmemory` | Increase Redis memory or shard; not expected before a 10× traffic event |
 | Ingest latency p99 | 5s | Investigate worker saturation first; replicate before sharding |
 | Concurrent UI operators | 10 | Raise Langfuse web replicas (stateless) |
@@ -376,11 +429,11 @@ These triggers are **observed-then-act**, not pre-emptive. We do not over-provis
 All stateful backends run single-replica in both phase α and production. This is an **explicit, accepted constraint** — not a phase-α shortcut that production is expected to fix. HA hardening is deferred (§14.4).
 
 - **ClickHouse** is single-replica. Scaling to ≥ 2 replicas for ingest parallelism is possible without HA; true HA (ReplicatedMergeTree + Keeper) is deferred.
-- **Postgres** is single-replica. Streaming replication + automated failover (e.g. CNPG) is deferred.
 - **MinIO** is single-node. Distributed-mode erasure coding is deferred.
 - **Redis** is standalone. Sentinel topology is deferred.
+- **Postgres** — not applicable here. Postgres is the shared system Postgres, not a Langfuse-deployed component. Any HA decision for the shared Postgres belongs to the shared system's operational model, not to the observability subsystem.
 
-These components fail over by restore-from-backup, not by automated replica promotion. That is the production model.
+ClickHouse, MinIO, and Redis fail over by restore-from-backup. That is the production model for Langfuse-owned components.
 
 ### 11.4 Capacity-driven scaling path
 
@@ -412,7 +465,7 @@ Observability has an explicit **1% monthly error budget** for availability. When
 ### 12.3 Ownership
 
 - **Platform team** owns the subsystem end-to-end. No separate observability team.
-- **On-call rotation** is shared with the gateway/runtime rotation. Observability does not have its own pager. Page-worthy conditions are limited to: (a) ingest failure > 5% over 10 min; (b) ClickHouse disk > 90%; (c) Postgres replication lag (once read replicas exist).
+- **On-call rotation** is shared with the gateway/runtime rotation. Observability does not have its own pager. Page-worthy conditions are limited to: (a) ingest failure > 5% over 10 min; (b) ClickHouse disk > 90%; (c) Langfuse web returning 5xx for > 5 min. Shared Postgres alerts belong to the shared system on-call rotation, not to this subsystem.
 - **Change review**: any PR that changes retention, tenancy mapping, or the emission contract requires the same reviewer as the `bot-config-api` observability module.
 
 ### 12.4 Runbook surface
@@ -433,7 +486,7 @@ The Helm chart is a **renderer**. It takes architectural policy and produces YAM
 - Service ports, probes, init containers.
 - Secret mount paths.
 - PVC sizes.
-- Subchart toggles (`clickhouse.enabled`, `redis.enabled`, `s3.deploy`).
+- Subchart toggles (`clickhouse.enabled`, `redis.enabled`, `s3.deploy`). **`postgresql.enabled` is always `false`** — Postgres is external (§5.4); Helm does not deploy a Postgres pod.
 - Ingress objects (once phase β permits a restricted ingress).
 
 ### 13.2 What architecture owns
@@ -445,6 +498,7 @@ The Helm chart is a **renderer**. It takes architectural policy and produces YAM
 - The **API-key-per-project** scope rule (§10.2) — project-key allocation is manual and one-time.
 - The **no-license-key invariant** — `langfuse.licenseKey` MUST remain unset. Any chart upgrade that changes this default requires architectural review.
 - The **no-public-ingress invariant** — binding on every deploy environment including production.
+- The **external Postgres boundary** (§5.4) — dedicated `langfuse` database, `langfuse_app` role, Vault DSN path, migration ownership. These are architecture decisions; the Helm chart only reads the DSN from Vault. Any change to the Postgres connection model requires updating §5.4, not just the chart.
 
 ### 13.3 Values reconciliation rule
 
@@ -483,7 +537,7 @@ These risks are **explicitly accepted** for single-node production. They are not
 | Node loss = full subsystem outage | **Yes** | Traces dropped during outage; OTLP clients retry but eventually give up; UI unreachable | Restore from off-cluster backup on node recovery; outage window traces are not reconstructed |
 | Disk failure = data loss up to last backup | **Yes** | Postgres: up to 15 min loss (WAL archiving). ClickHouse: up to 24 hr loss (nightly incremental). MinIO blobs: up to 7 days loss (weekly mirror) | Off-cluster backup target covers catastrophic disk failure; backup RTO ~ hours not minutes |
 | No automated failover for any backend | **Yes** | Recovery requires manual restore; operator-in-the-loop | Off-cluster backup + restore rehearsal + runbook are the recovery path |
-| Single-point-of-failure for config/auth (Postgres) | **Yes** | Losing Postgres loses API keys and project config; services emit spans but Langfuse cannot authenticate them | Postgres is backed up nightly with WAL; restore recovers config; key rotation during restore recovery is manual |
+| Shared system Postgres outage = Langfuse config/auth loss | **Yes** | If the shared system Postgres is unavailable, Langfuse cannot authenticate inbound spans or serve the UI; ClickHouse data is unaffected and intact | Shared system Postgres backup (WAL archiving) covers recovery; Langfuse-specific restore procedure documented in §5.4; key rotation after restore is manual |
 | Redis standalone queue loss on restart | **Yes** | In-flight span batches in Redis queue at time of failure are lost; OTLP retry paths at the emitter absorb this | Accepted per §9.2 rationale |
 
 ### 14.3 Backup/restore contract (primary durability mechanism)
@@ -492,13 +546,13 @@ At production, off-cluster backup is the only durability guarantee. The backup c
 
 | Component | Backup method | Target | RPO | RTO |
 |---|---|---|---|---|
-| Postgres | Continuous WAL archiving + nightly `pg_dump` to off-cluster | Resolved per #168 | 15 min (WAL) | 30 min (restore) |
-| ClickHouse | Weekly `BACKUP TABLE` + nightly `BACKUP INCREMENTAL` to off-cluster | Same off-cluster target | 24 hr | 2 hr |
-| MinIO | Weekly `mc mirror` to off-cluster | Same off-cluster target | 7 days | Manual re-sync |
+| Postgres `langfuse` DB | Covered by **shared system Postgres WAL archiving + nightly dump**. No Langfuse-specific Postgres backup job. Pre-condition: shared system backup must be confirmed operational. | Shared system off-cluster backup target | 15 min (WAL) | 30 min (named database restore) |
+| ClickHouse | Weekly `BACKUP TABLE` + nightly `BACKUP INCREMENTAL` | Off-cluster target per [`#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168) | 24 hr | 2 hr |
+| MinIO | Weekly `mc mirror` | Same off-cluster target | 7 days | Manual re-sync |
 | Redis | None (ephemeral) | N/A | N/A | N/A |
-| Langfuse secrets (encryption key, NEXTAUTH) | Vault path `secret/langfuse/*` | Vault-backed | Vault-backed | Immediate |
+| Langfuse secrets (encryption key, NEXTAUTH, Postgres DSN) | Vault path `secret/langfuse/*` | Vault-backed | Vault-backed | Immediate |
 
-**Off-cluster backup target** is a production blocker — tracked at [`agentopia-infra#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168). This must resolve before production promotion.
+**Off-cluster backup target** is a production blocker for ClickHouse and MinIO backups — tracked at [`agentopia-infra#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168). Postgres backup is handled by the shared system.
 
 ### 14.4 HA deferral
 
@@ -506,13 +560,14 @@ HA for any component of the observability subsystem is explicitly deferred. This
 
 | Deferred item | What it would require | Why deferred |
 |---|---|---|
-| Postgres HA (CNPG or equivalent) | Streaming replication, automated failover, ≥2 nodes | Cluster is single-node; single-node production target does not require it |
-| ClickHouse HA (ReplicatedMergeTree + Keeper) | ≥2 CH replicas + 3-node Keeper quorum, ≥3 cluster nodes | Same — cluster is single-node; adds significant operational complexity |
+| ClickHouse HA (ReplicatedMergeTree + Keeper) | ≥2 CH replicas + 3-node Keeper quorum, ≥3 cluster nodes | Cluster is single-node; adds significant operational complexity |
 | Redis Sentinel | 1 primary + 2 replicas + 3 Sentinels, ≥3 cluster nodes | Same |
 | MinIO distributed mode | ≥4 drives across ≥4 nodes | Same |
 | ≥3 worker node cluster expansion | Physical or VM provisioning | Prerequisite for any of the above; not currently planned |
 
-If HA is ever revisited, it requires: (a) cluster expansion to ≥3 worker nodes, (b) a new architecture decision round (this document does not pre-commit to any HA topology), and (c) updates to this document.
+**Postgres HA is not listed here.** Postgres is the shared system Postgres; its HA model is the shared system's concern, not the observability subsystem's. Changes to the shared Postgres HA posture do not require an update to this document.
+
+If HA is ever revisited for ClickHouse/Redis/MinIO, it requires: (a) cluster expansion to ≥3 worker nodes, (b) a new architecture decision round, and (c) updates to this document.
 
 ### 14.5 Promotion criteria (Draft → Accepted — production)
 
@@ -520,13 +575,14 @@ This document exits "Draft" status and becomes "Accepted — production" only wh
 
 1. Phase β exit criterion met: end-to-end trace observable in Langfuse UI spanning gateway → plugin → Temporal → A2A.
 2. Retention DDL active: ClickHouse TTL clauses applied; hot-tier coverage confirmed for ≥ 7 days.
-3. Off-cluster backup target resolved ([`#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168) closed): a real off-cluster destination for Postgres WAL, ClickHouse BACKUPs, and MinIO mirror.
-4. Backup contract active: Postgres WAL archiving continuous; ClickHouse nightly incremental running; MinIO weekly mirror running; all to the off-cluster target.
-5. Restore rehearsal passed: successful end-to-end restore from off-cluster backup in `observability-restore-test` namespace; RTO documented.
-6. Auth hardened: operator allowlist enforced; project API keys in Vault; key rotation procedure documented.
-7. Sizing validated: capacity review run against §11.2 triggers; no trigger in breach.
-8. Incident runbook exists: `docs/operations/observability-incident-response.md` with restore sequencing.
-9. §12.1 production (single-node) SLO targets met for ≥ 30 continuous days.
+3. External Postgres boundary wired ([`#170`](https://github.com/ai-agentopia/agentopia-infra/issues/170) closed): `langfuse` database created, `langfuse_app` role created with correct grants, Vault secret `secret/langfuse/postgres-dsn` populated, chart deployed with `postgresql.enabled: false`.
+4. Off-cluster backup target resolved ([`#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168) closed): a real off-cluster destination for ClickHouse BACKUPs and MinIO mirror. Shared system Postgres backup must also be confirmed operational (it covers the `langfuse` database).
+5. Backup contract active: shared system Postgres WAL archiving confirmed active and including `langfuse` database; ClickHouse nightly incremental running to off-cluster target; MinIO weekly mirror running to off-cluster target.
+6. Restore rehearsal passed: successful end-to-end restore from backup in `observability-restore-test` namespace (ClickHouse + MinIO from off-cluster; `langfuse` database from shared Postgres backup); RTO documented.
+7. Auth hardened: operator allowlist enforced; project API keys in Vault; Postgres DSN in Vault; key rotation procedure documented.
+8. Sizing validated: capacity review run against §11.2 triggers; no trigger in breach; shared Postgres connection headroom confirmed.
+9. Incident runbook exists: `docs/operations/observability-incident-response.md` with restore sequencing including Postgres restore path.
+10. §12.1 production (single-node) SLO targets met for ≥ 30 continuous days.
 
 **There is no single-node-drain exercise requirement.** That exercise tests HA; this is a single-node production model. Node loss = outage is accepted (§14.2).
 
@@ -540,12 +596,13 @@ Two phases followed by a production promotion gate. All sit under the [`#467`](h
 
 Single-node, single-replica, `local-path`. Acceptable because of current volume (§11.1) and operator count. Dev/staging.
 
-1. Infra PR lands the Helm Application in ArgoCD with the single-node values from ADR-015 and §11.3.
-2. Operator bootstraps organizations + projects per §7.1. **One-time manual step.**
-3. Project secret keys stored in Vault, mounted into `bot-config-api` pod.
-4. `OTEL_EXPORTER_OTLP_ENDPOINT` set on `bot-config-api` deployment — the existing groundwork (PR #487) starts ingesting.
-5. Operator validates: one RunContract construction produces one trace visible in the Langfuse UI, tagged with the right project.
-6. Retention DDL applied post-install to ClickHouse event tables per §8.1.
+1. External Postgres boundary set up ([`#170`](https://github.com/ai-agentopia/agentopia-infra/issues/170)): `langfuse` database created on shared Postgres, `langfuse_app` role created, DSN written to Vault at `secret/langfuse/postgres-dsn`. **Prerequisite for step 2.**
+2. Infra PR lands the Helm Application in ArgoCD with the single-node values from ADR-015 and §11.3. `postgresql.enabled: false`; chart reads DSN from Vault. ClickHouse, Redis, MinIO deployed as Langfuse subcharts on `local-path`.
+3. Operator bootstraps organizations + projects per §7.1. **One-time manual step.**
+4. Project secret keys stored in Vault, mounted into `bot-config-api` pod.
+5. `OTEL_EXPORTER_OTLP_ENDPOINT` set on `bot-config-api` deployment — the existing groundwork (PR #487) starts ingesting.
+6. Operator validates: one RunContract construction produces one trace visible in the Langfuse UI, tagged with the right project.
+7. Retention DDL applied post-install to ClickHouse event tables per §8.1.
 
 **Exit criterion for phase α:** traces from `bot-config-api` are visible in the Langfuse UI, tagged by project, with correct `agentopia.*` attributes. Phase α exits into phase β.
 
@@ -565,13 +622,14 @@ Deployment shape unchanged. What changes is emission coverage.
 
 Deployment shape unchanged from phase β. This is the gate that converts dev/staging into production. Every §14.5 criterion must be satisfied:
 
-1. Off-cluster backup target resolved ([`#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168) closed).
-2. Backup contract active: Postgres WAL archiving continuous; ClickHouse nightly incremental; MinIO weekly mirror — all to the off-cluster target.
-3. Restore rehearsal passed in `observability-restore-test` namespace; RTO documented.
-4. Auth hardened: operator allowlist enforced; project API keys in Vault; rotation procedure documented.
-5. Sizing validated: capacity review against §11.2 triggers; no trigger in breach.
-6. Incident runbook authored: `docs/operations/observability-incident-response.md`.
-7. 30-day SLO burn-in at production (single-node) targets per §12.1.
+1. External Postgres boundary wired ([`#170`](https://github.com/ai-agentopia/agentopia-infra/issues/170) closed): `langfuse` database + `langfuse_app` role + Vault DSN.
+2. Off-cluster backup target resolved ([`#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168) closed): off-cluster destination for ClickHouse + MinIO; shared Postgres backup confirmed active.
+3. Backup contract active: shared Postgres WAL covering `langfuse` DB; ClickHouse nightly incremental; MinIO weekly mirror — all confirmed running.
+4. Restore rehearsal passed in `observability-restore-test` namespace; RTO documented.
+5. Auth hardened: operator allowlist enforced; project API keys in Vault; Postgres DSN in Vault; rotation procedure documented.
+6. Sizing validated: capacity review against §11.2 triggers; shared Postgres connection headroom confirmed.
+7. Incident runbook authored: `docs/operations/observability-incident-response.md`.
+8. 30-day SLO burn-in at production (single-node) targets per §12.1.
 
 **Exit criterion:** all §14.5 promotion criteria met. This document moves from Draft to Accepted — production (single-node).
 
@@ -603,19 +661,18 @@ Deployment shape unchanged from phase β. This is the gate that converts dev/sta
 
 Questions in this list must be resolved before the document exits Draft (§14.5 promotion criteria):
 
-1. **Off-cluster backup target** ([`#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168)). What specifically — another MinIO instance on separate hardware, an external S3-compatible provider, cold/tape storage? Non-negotiable at production; unresolved today. Until #168 is closed, promotion cannot proceed.
-2. **ClickHouse TTL implementation shape.** `TTL ... TO DISK 'cold'` (requires a dedicated cold volume class) vs `TTL ... DELETE` with the weekly export to MinIO/off-cluster. Decide at the phase-α retention DDL step; the architectural invariant is: no trace silently lost before 30 days, no trace persisting past 2 years without explicit legal hold.
-3. **Incident runbook ownership.** Who authors `docs/operations/observability-incident-response.md`, and when — before production promotion or alongside the first phase-α deploy? It must exist before promotion (§14.5 criterion 8).
+1. **External Postgres boundary wiring** ([`#170`](https://github.com/ai-agentopia/agentopia-infra/issues/170)). Create the `langfuse` database and `langfuse_app` role on the shared system Postgres; populate `secret/langfuse/postgres-dsn` in Vault; configure the chart with `postgresql.enabled: false`. **Prerequisite for all other deploy steps.** Tracked at infra#170.
+2. **Off-cluster backup target** ([`#168`](https://github.com/ai-agentopia/agentopia-infra/issues/168)). What specifically — another MinIO instance on separate hardware, an external S3-compatible provider, cold/tape storage? Required for ClickHouse BACKUPs and MinIO mirror. The `langfuse` Postgres database backup is covered by the shared system — that system's off-cluster backup posture must also be confirmed. Until #168 is closed, promotion cannot proceed.
+3. **ClickHouse TTL implementation shape.** `TTL ... TO DISK 'cold'` (requires a dedicated cold volume class) vs `TTL ... DELETE` with the weekly export to MinIO/off-cluster. Decide at the phase-α retention DDL step; the architectural invariant is: no trace silently lost before 30 days, no trace persisting past 2 years without explicit legal hold.
+4. **Incident runbook ownership.** Who authors `docs/operations/observability-incident-response.md`, and when — before production promotion or alongside the first phase-α deploy? It must exist before promotion (§14.5 criterion 9).
 
-Note: HA-related questions (storage class, Postgres HA operator, Redis Sentinel, MinIO distributed, cluster expansion) are **not** open questions for this document — they are deferred decisions (§14.4). They do not block promotion.
+Note: HA-related questions (ClickHouse Keeper, Redis Sentinel, MinIO distributed, cluster expansion) are **not** open questions for this document — they are deferred decisions (§14.4). Postgres HA is the shared system's concern. They do not block promotion.
 
 ### 16.3 Open questions — tracked, not blocking promotion
 
-1. **ClickHouse TTL implementation shape** — `TTL ... TO DISK 'cold'` vs weekly export-and-delete. Decide at deploy time.
-2. **Exact retention thresholds for score-carrying traces** — 1 year is the current architectural target; revisit once WP-H3-03 defines eval corpus requirements.
-3. **Trace sampler at emitter** — accept 100% sampling or reduce to `parentbased_traceidratio=0.5` on the autonomous lane. Phase β measurements drive the decision.
-4. **Incident runbook ownership** — `docs/operations/observability-incident-response.md` does not yet exist. Owned by whoever lands the infra PR on `#163`.
-5. **UI auth phase-β timing** — SSO migration is on the phase-γ critical path; earlier adoption is allowed but not required.
+1. **Exact retention thresholds for score-carrying traces** — 1 year is the current architectural target; revisit once WP-H3-03 defines eval corpus requirements.
+2. **Trace sampler at emitter** — accept 100% sampling or reduce to `parentbased_traceidratio=0.5` on the autonomous lane. Phase β measurements drive the decision.
+3. **UI auth** — built-in email+password is acceptable at both phase α and production (single-node operator set is small). SSO/OIDC is a future hardening step, not a production requirement.
 
 ### 16.4 Not open — already decided
 
@@ -624,7 +681,9 @@ Note: HA-related questions (storage class, Postgres HA operator, Redis Sentinel,
 - **Per-project API key scope.** §10.2. Do not reopen.
 - **Production target is single-node.** §14. HA is explicitly deferred. Do not treat HA as an implicit production expectation.
 - **Single-node-loss is accepted at production.** §14.2. Node loss = outage = restore from backup. Do not renegotiate without a separate architecture decision round.
-- **No HA blocker on promotion.** HA questions (CNPG, ClickHouse Keeper, Redis Sentinel, MinIO distributed, ≥3 node cluster) do not block document promotion. They are deferred. Do not re-add them to §16.2.
+- **No HA blocker on promotion.** HA questions (ClickHouse Keeper, Redis Sentinel, MinIO distributed, ≥3 node cluster) do not block document promotion. They are deferred. Do not re-add them to §16.2.
+- **Postgres is external (shared system).** `postgresql.enabled: false`. Dedicated `langfuse` database + `langfuse_app` role + Vault DSN. This is settled. Do not reopen as subchart or standalone pod. Postgres HA is the shared system's concern.
+- **ClickHouse, Redis, MinIO are standalone Langfuse subcharts.** Single-replica, `local-path`. Do not reopen as shared resources.
 
 ---
 
