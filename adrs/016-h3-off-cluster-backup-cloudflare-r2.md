@@ -4,7 +4,7 @@ title: "ADR-016: Off-Cluster Backup Target for Observability (Cloudflare R2)"
 
 # ADR-016: Off-Cluster Backup Target for Observability (Cloudflare R2)
 
-**Status**: Proposed — pending operator approval to provision the Cloudflare R2 account and credentials (see §Open approval below).
+**Status**: **On Hold — execution deferred 2026-04-24.** Off-cluster backup was reviewed as optional at this stage. The decision (Cloudflare R2) is locked and the infra groundwork ([agentopia-infra#175](https://github.com/ai-agentopia/agentopia-infra/pull/175)) is merged and ready to activate, but R2 provisioning, the seed script run, CronJob apply/unsuspend, and the first restore rehearsal are explicitly not going to happen until this ticket is re-prioritized. See [agentopia-infra#168](https://github.com/ai-agentopia/agentopia-infra/issues/168) for the deferral context; accepted risk is node/disk loss → observability data loss up to the §8 retention ceiling. When this ADR moves back to active, no architectural changes are expected — the activation is a sequence of operator actions, not a re-decision.
 **Date**: 2026-04-24
 **Context**: [agentopia-infra#168](https://github.com/ai-agentopia/agentopia-infra/issues/168), [H3 Observability Production Design §9 + §14.5 criterion 4](../architecture/harness-control/h3-observability-production-design). Blocks promotion of the production design from Draft to Accepted.
 
