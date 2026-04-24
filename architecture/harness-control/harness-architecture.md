@@ -12,7 +12,7 @@ title: "Harness Architecture"
 
 ## 1. Executive Summary
 
-Agentopia's harness is a **hybrid, Agentopia-owned system**. The platform does not adopt a third-party agent framework as its primary harness. Instead, Agentopia builds the domain-specific control primitives itself (intent router, run contract, capability classes, artifact taxonomy, checkpoint policy matrix, and the R1/R2/R3 safety rails), keeps in-house what already works (A2A, `sessions_spawn`, ACP harness), and integrates mature external systems selectively where they genuinely outperform what we would build (Temporal for durable orchestration; MCP as a tool/context protocol; OpenTelemetry + OpenInference for traces; Arize Phoenix or Langfuse as the trace/eval backend).
+Agentopia's harness is a **hybrid, Agentopia-owned system**. The platform does not adopt a third-party agent framework as its primary harness. Instead, Agentopia builds the domain-specific control primitives itself (intent router, run contract, capability classes, artifact taxonomy, checkpoint policy matrix, and the R1/R2/R3 safety rails), keeps in-house what already works (A2A, `sessions_spawn`, ACP harness), and integrates mature external systems selectively where they genuinely outperform what we would build (Temporal for durable orchestration; MCP as a tool/context protocol; OpenTelemetry + OpenInference for traces; **Langfuse (MIT core) as the trace/eval backend per [ADR-015](../../adrs/015-h3-02-trace-backend-langfuse). Production service design drafted in [H3 Observability Production Design](./h3-observability-production-design) — phase-α shape specified, production steady-state target specified with open gaps; document still Draft**).
 
 The harness is not a single new service. It is a contract enforced at the right layer: `bot-config-api` as control plane, Temporal as the deterministic orchestration spine, `agentopia-core` gateway as the autonomous execution plane, and a trace/eval pipeline that every harnessed run emits into.
 
@@ -25,7 +25,7 @@ flowchart TB
     CP["Control Plane<br/>bot-config-api<br/>- intent registry<br/>- capabilityClass<br/>- run templates<br/>- checkpoint policy"] --> DEP["Deployment Layer<br/>Helm / ArgoCD<br/>- renders policy"]
     DEP --> GW["Autonomous Execution Plane<br/>agentopia-core gateway<br/>- run loop<br/>- tools/plugins<br/>- A2A<br/>- sessions_spawn<br/>- ACP"]
     CP --> TW["Deterministic Orchestration Spine<br/>Temporal<br/>- typed workflows<br/>- approvals<br/>- cancel / control paths"]
-    GW --> OBS["Observability Layer<br/>OTEL + OpenInference<br/>Phoenix or Langfuse"]
+    GW --> OBS["Observability Layer<br/>OTEL + OpenInference<br/>Langfuse (ADR-015)"]
     TW --> OBS
     GW --> ART["Artifact Store<br/>Postgres<br/>- plans<br/>- packets<br/>- checkpoints<br/>- outcomes"]
     TW --> ART
@@ -38,7 +38,7 @@ flowchart TB
 1. **Agentopia builds its own harness.** No agent framework is adopted as the primary orchestrator. Pattern adoption is allowed (Claude Agent SDK subagent isolation, OpenAI Agents SDK run-loop contract); framework adoption is not.
 2. **The harness has three ownership tiers.** Control plane in `bot-config-api`. Deterministic orchestration in Temporal. Autonomous execution in the `agentopia-core` gateway.
 3. **Existing strengths are preserved.** In-house A2A (orchestrator↔specialist threads with turn limits and checkpoints), `sessions_spawn` (bounded subagent spawn), and the ACP harness lane remain in place and are brought under the unified run contract.
-4. **Observability is integrated, not built.** OpenTelemetry wire format + OpenInference semantic conventions; Arize Phoenix or Langfuse as the backend (ARB to choose).
+4. **Observability is integrated, not built.** OpenTelemetry wire format + OpenInference semantic conventions; Langfuse (MIT core) as the backend per [ADR-015](../../adrs/015-h3-02-trace-backend-langfuse). Production service design at [H3 Observability Production Design](./h3-observability-production-design) specifies phase-α shape and the production target (single-node, restore-from-backup, HA explicitly deferred); document is still Draft pending operational hardening criteria (§14.5).
 5. **Tool/context protocol is MCP.** Continue expanding the existing `mcp-bridge` surface. MCP is not the harness; it is the protocol at the tool-call boundary.
 6. **The approved runtime-facts baseline is binding.** `admin_mutate` remains an Admin-class tool with a closed action enum, cap=1/turn, and audit-log sink. Capability classes (Conversant ⊂ Worker ⊂ Orchestrator ⊂ Admin) remain the single tool-surface policy. No part of this document overrides either.
 
@@ -54,7 +54,7 @@ flowchart TB
 | Agent↔agent collaboration | In-house A2A (JSON-RPC) | Orchestrator-driven threads with turn limits, checkpoints, idempotency, recovery |
 | Tool / context protocol | MCP via `mcp-bridge` extension | External and internal tool exposure; not the harness |
 | Artifact store | Postgres (existing) | Plans, task packets, checkpoint summaries, evaluator findings, final outcomes |
-| Traces + evals | OpenTelemetry + OpenInference → Phoenix or Langfuse | One trace per harnessed run; spans for LLM calls, tool calls, subagent spawns, checkpoints |
+| Traces + evals | OpenTelemetry + OpenInference → Langfuse (MIT core, ADR-015) | One trace per harnessed run; spans for LLM calls, tool calls, subagent spawns, checkpoints. See [production design](./h3-observability-production-design). |
 | Safety rails | `agentopia-core` | R1 per-tool-per-turn cap (primary, generic); R2 per-class `maxToolCalls` budget; R3 loop-detection-on by default |
 | Human checkpoints | Workflow/thread-native primitives + control-plane policy matrix | Apply approval at the correct boundary: workflow/work-item via Temporal and control-plane APIs, A2A/relay via thread checkpoints, sensitive autonomous tool calls via the generic approval sidecar |
 
@@ -93,7 +93,7 @@ flowchart LR
 |---|---|
 | **Build in-house** (domain-specific, small, high-value) | Intent router, typed front-door registry, run-contract schema, capability-class enum and enforcement, artifact taxonomy, checkpoint policy matrix, R1/R2/R3 safety rails, `admin_inspect` / `admin_mutate` tools |
 | **Extend what already works** | Temporal (stays the durable orchestration spine; extend to typed front doors where non-chat ingress exists today); in-house A2A; `sessions_spawn`; ACP harness; `mcp-bridge`; `governance-bridge` `execution_class` pattern; proxy-routed-provider reconcile pattern |
-| **Integrate mature OSS / standards** | OpenTelemetry + OpenInference (instrumentation); Phoenix or Langfuse (trace/eval backend; ARB to pick); MCP (protocol); ACP (align to Zed spec where feasible); AGENTS.md (documentation convention per repo) |
+| **Integrate mature OSS / standards** | OpenTelemetry + OpenInference (instrumentation); Langfuse MIT core (trace/eval backend, ADR-015); MCP (protocol); ACP (align to Zed spec where feasible); AGENTS.md (documentation convention per repo) |
 | **Reject as primary harness** | OpenAI Agents SDK, Claude Agent SDK, AutoGen, LangGraph-as-orchestrator, CrewAI, OpenHands, Goose, Permit.io |
 | **Reference only (pattern adoption)** | Claude Agent SDK's subagent isolation ("only final message returns; children cannot spawn children"); OpenAI Agents SDK run-loop contract (final-output rule + max-turns); Temporal AI patterns |
 
@@ -108,7 +108,7 @@ Phasing, aligned with the existing [Agent Harness Control Plane milestone](../..
 - **Phase H1b — gateway-fork ingress (depends on milestone #25).** Deterministic ingress for chat-originated typed intents (delivery-start is the canonical case) requires the gateway fork. Parallel to H2/H2.5/H3 once the fork lands.
 - **Phase H2 — run contract + artifact handoff.** Schema published; attached to every autonomous run path (specialist chat, A2A, subagent, ACP); artifacts persisted in Postgres; `reconcile-capability` endpoint modelled on `reconcile-routing`.
 - **Phase H2.5 — capability class implementation.** `capability-classes.ts`, chart renders `tools.allow` from `.Values.capabilityClass`, `admin_inspect` / `admin_mutate` split with audit sink (Phase 2.5 gate), `session_status` removed from agent-callable registration.
-- **Phase H3 — traces / evals / checkpoints.** Instrument gateway with OTEL + OpenInference; stand up Phoenix or Langfuse; checkpoint policy matrix live for irreversible actions; unify workflow-, thread-, and tool-boundary approval semantics without forcing all approvals into one hop; one task class with eval coverage.
+- **Phase H3 — traces / evals / checkpoints.** Instrument gateway with OTEL + OpenInference; stand up Langfuse per ADR-015 against the service design at [h3-observability-production-design](./h3-observability-production-design) (phase α first; production target is single-node with restore-from-backup — HA explicitly deferred; promotion criteria at §14.5 of that document); checkpoint policy matrix live for irreversible actions; unify workflow-, thread-, and tool-boundary approval semantics without forcing all approvals into one hop; one task class with eval coverage.
 - **Phase H4 — ACP hardening.** ACP restricted to Orchestrator/Admin classes; runs emit the same run-contract and traces as direct specialist runs; alignment to Zed's ACP spec where feasible.
 
 ### 6.1 Implementation Sequence
@@ -144,4 +144,4 @@ flowchart LR
 
 Agentopia's harness is built in-house where the work is domain-specific, extended where existing subsystems already do the right thing, and integrates external systems only where they are clearly mature and provider-agnostic. The runtime-facts baseline remains binding. Chat-originated deterministic ingress is a real constraint that this architecture acknowledges and plans for through H1b, not a gap this document pretends to solve.
 
-This is the architecture direction for implementation planning. Open ARB choices (Phoenix vs Langfuse; AGENTS.md adoption scope; any future deterministic admin-mutation debate) do not block progress on Phases H1a, H2, H2.5, H3, or H4.
+This is the architecture direction for implementation planning. Remaining open ARB choices (AGENTS.md adoption scope; any future deterministic admin-mutation debate) do not block progress on Phases H1a, H2, H2.5, H3, or H4. The trace backend question was resolved on 2026-04-23 in [ADR-015](../../adrs/015-h3-02-trace-backend-langfuse).
