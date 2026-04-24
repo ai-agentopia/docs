@@ -152,7 +152,7 @@ Testing migration fallback (empty capabilityClass)...
 Testing strictCapabilityClass behavior...
 
 === Chart template test results ===
-PASSED: 61
+PASSED: 74
 FAILED: 0
 All chart template tests passed.
 ```
@@ -161,7 +161,7 @@ On any failure the script exits 1 and prints the failing assertions:
 
 ```
 === Chart template test results ===
-PASSED: 59
+PASSED: 72
 FAILED: 2
 
   FAIL [admin/admin-inspect]: expected 'admin_inspect' in allow list
