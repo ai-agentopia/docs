@@ -50,6 +50,7 @@
           {
             "group": "Workflow & Delivery",
             "pages": [
+              "architecture/how-delivery-works",
               "architecture/a2a-full-design",
               "architecture/governed-pr-review-workflow"
             ]

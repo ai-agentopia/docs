@@ -9,16 +9,16 @@ Cloudflare Tunnel provides secure external access to Agentopia services running 
 ## Architecture
 
 ```
-Browser → agentopia.creodeck.space
+Browser → dev.agentopia.vn  (or uat.agentopia.vn / temporal.agentopia.vn)
          → Cloudflare Edge (TLS termination, DDoS, caching)
          → Cloudflare Tunnel (QUIC, outbound-only from k3s)
          → cloudflared pod (kube-system namespace)
-         → bot-config-api.agentopia.svc.cluster.local:80
+         → agentopia-ui.agentopia-dev.svc.cluster.local:80
 ```
 
 Key properties:
 - **Outbound-only**: cloudflared initiates connections to Cloudflare — no inbound ports needed on server36
-- **TLS**: Cloudflare handles TLS certificates automatically (wildcard `*.creodeck.space`)
+- **TLS**: Cloudflare handles TLS certificates automatically (`*.agentopia.vn`)
 - **Local config mode**: Ingress rules defined in k8s ConfigMap (not Cloudflare dashboard)
 
 ## Current Setup
@@ -28,7 +28,7 @@ Key properties:
 | cloudflared Deployment | `kube-system` namespace, server36 k3s |
 | ConfigMap `cloudflared-config` | `kube-system` — contains `config.yaml` with ingress rules |
 | Secret `cloudflared-credentials` | `kube-system` — tunnel credentials (derived from TUNNEL_TOKEN) |
-| DNS CNAME | `agentopia.creodeck.space` → `b7a302f5-...cfargotunnel.com` (Cloudflare DNS) |
+| DNS CNAMEs | `*.agentopia.vn` → `b7a302f5-...cfargotunnel.com` (Cloudflare DNS) |
 
 Tunnel ID: `b7a302f5-0a49-4544-9eec-cd4425e72fa3`
 
@@ -38,8 +38,12 @@ Current routes (defined in ConfigMap `cloudflared-config`):
 
 | Hostname | Service | Purpose |
 |---|---|---|
-| `agentopia.creodeck.space` | `http://bot-config-api.agentopia.svc.cluster.local:80` | Bot Config API (API-only) |
+| `dev.agentopia.vn` | `http://agentopia-ui.agentopia-dev.svc.cluster.local:80` | Dev environment UI + API |
+| `uat.agentopia.vn` | `http://uat-agentopia-ui.agentopia-uat.svc.cluster.local:80` | UAT environment UI + API |
+| `temporal.agentopia.vn` | `http://temporal-ui.agentopia-dev.svc.cluster.local:8080` | Temporal Web UI (dev) |
 | (catch-all) | `http_status:404` | Reject unknown hostnames |
+
+**Note:** All traffic enters through `agentopia-ui` (nginx reverse proxy), which proxies `/api/v1/*` to `bot-config-api`. There is no direct external tunnel route to `bot-config-api`.
 
 ## How to Reproduce (from scratch)
 
@@ -59,7 +63,6 @@ TUNNEL_ID="<your-tunnel-id>"
 **Create credentials secret** (convert TUNNEL_TOKEN to credentials.json):
 
 ```bash
-# Decode TUNNEL_TOKEN → credentials.json → k8s Secret
 echo "<TUNNEL_TOKEN>" | base64 -d | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
@@ -86,8 +89,12 @@ data:
     no-autoupdate: true
     loglevel: info
     ingress:
-      - hostname: agentopia.creodeck.space
-        service: http://bot-config-api.agentopia.svc.cluster.local:80
+      - hostname: dev.agentopia.vn
+        service: http://agentopia-ui.agentopia-dev.svc.cluster.local:80
+      - hostname: uat.agentopia.vn
+        service: http://uat-agentopia-ui.agentopia-uat.svc.cluster.local:80
+      - hostname: temporal.agentopia.vn
+        service: http://temporal-ui.agentopia-dev.svc.cluster.local:8080
       - service: http_status:404
 EOF
 ```
@@ -152,25 +159,27 @@ spec:
 EOF
 ```
 
-### 3. Create DNS CNAME
+### 3. Create DNS CNAMEs
 
-In Cloudflare Dashboard (dash.cloudflare.com) → `creodeck.space` → DNS → Add Record:
+In Cloudflare Dashboard → `agentopia.vn` → DNS → Add Records:
 
 | Type | Name | Target | Proxy |
 |---|---|---|---|
-| CNAME | `agentopia` | `<tunnel-id>.cfargotunnel.com` | Proxied (orange) |
+| CNAME | `dev` | `<tunnel-id>.cfargotunnel.com` | Proxied (orange) |
+| CNAME | `uat` | `<tunnel-id>.cfargotunnel.com` | Proxied (orange) |
+| CNAME | `temporal` | `<tunnel-id>.cfargotunnel.com` | Proxied (orange) |
 
 ### 4. Verify
 
 ```bash
-# Health check
-curl https://agentopia.creodeck.space/health
+# Dev environment health check
+curl https://dev.agentopia.vn/health
 # → {"status":"ok","version":"2.0.0"}
 
-# Health check (alternate)
-curl https://agentopia.creodeck.space/health
+# UAT environment health check
+curl https://uat.agentopia.vn/health
 
-# Check tunnel connections (should show 4 registered)
+# Check tunnel connections
 kubectl logs deploy/cloudflared -n kube-system --tail=10
 ```
 
@@ -181,8 +190,8 @@ Edit the ConfigMap and restart:
 ```bash
 kubectl edit configmap cloudflared-config -n kube-system
 # Add new hostname under ingress: (above the catch-all)
-#   - hostname: newservice.creodeck.space
-#     service: http://new-service.agentopia.svc.cluster.local:8080
+#   - hostname: newservice.agentopia.vn
+#     service: http://new-service.agentopia-dev.svc.cluster.local:8080
 
 kubectl rollout restart deploy/cloudflared -n kube-system
 ```
@@ -196,3 +205,4 @@ Then add a CNAME DNS record for the new hostname → same tunnel ID `.cfargotunn
 3. **Catch-all rule required**: cloudflared config must end with `- service: http_status:404` as the last ingress entry.
 4. **DNS propagation**: After adding CNAME, may take 1-5 minutes. Use `dig @1.1.1.1 <hostname>` to check Cloudflare DNS directly.
 5. **Not ArgoCD-managed**: cloudflared lives in `kube-system` (outside agentopia namespace). Treated as cluster infrastructure, applied manually. If cluster is rebuilt, re-run steps above.
+6. **All traffic via agentopia-ui**: Do NOT route external hostnames directly to `bot-config-api`. The nginx proxy in `agentopia-ui` handles API routing and auth middleware.

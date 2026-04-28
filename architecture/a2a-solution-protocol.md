@@ -208,9 +208,9 @@ The production target is achieved through a hybrid architecture:
 |---|---|---|---|
 | **Agentopia** | FastAPI + Gateway | Domain state (Postgres), role contracts, governance auth, GitHub execution, bot runtime | Orchestration durability, planning decisions, long-running coordination |
 | **Temporal** | Temporal Server + Workers | Durable orchestration lifecycle, signal/update handling, retry/timeout, activity scheduling | Business rules, domain state, GitHub artifacts, LLM reasoning |
-| **LangGraph** | Python within Temporal activities | Planning decisions, multi-agent reasoning, supervisor routing (ephemeral cognitive state) | Durable execution, domain persistence, orchestration lifecycle |
+| **LangGraph** | Dedicated reasoning service | Planning decomposition, review shadow analysis (ephemeral cognitive state) | Durable execution, domain persistence, orchestration lifecycle |
 
-**Why hybrid:** Agentopia excels at governed execution but is not designed for durable long-running coordination or LLM-based planning. Temporal provides durable event-driven orchestration. LangGraph provides cognitive multi-agent reasoning. Building all three inside Agentopia would mean reinventing these runtimes.
+**Why hybrid:** Agentopia excels at governed execution but is not designed for durable long-running coordination or LLM-based planning. Temporal provides durable event-driven orchestration. LangGraph provides cognitive multi-agent reasoning via a dedicated service. Building all three inside Agentopia would mean reinventing these runtimes.
 
 ### 5.2 Layer Ownership Model
 
@@ -238,11 +238,12 @@ The production target is achieved through a hybrid architecture:
 ├──────────────┼──────────────────────────────────────────────┤
 │              │                                              │
 │  LANGGRAPH   │  Cognitive decisions (ephemeral):             │
-│  (In-memory, │  - Planning decomposition                    │
-│   no persist)│  - Review analysis                           │
-│              │  - Actor routing selection                    │
-│              │  - Runs ONLY inside Temporal activities       │
-│              │  - NO I/O, NO service imports                 │
+│  (Reasoning  │  - Planning decomposition                    │
+│   Service)   │  - Review shadow analysis                    │
+│              │  - Actor routing (still in control plane)     │
+│              │  - Runs as dedicated reasoning service        │
+│              │  - Called via HTTP from Temporal activities    │
+│              │  - NO persistence, NO GitHub I/O              │
 │              │                                              │
 ├──────────────┼──────────────────────────────────────────────┤
 │              │                                              │
@@ -260,7 +261,7 @@ Two distinct integration patterns:
 - **Inbound (Temporal → Agentopia):** Activities in `integration/temporal/` call Agentopia services. Anti-corruption boundary for data translation and idempotency.
 - **Outbound (Agentopia → Temporal):** `infrastructure/orchestration/temporal_client.py` signals running Temporal workflows (e.g., webhook received).
 
-LangGraph runs exclusively inside Temporal activities. No direct service calls. Pure cognitive: receives data, returns decisions.
+LangGraph graphs run in a dedicated reasoning service, called via HTTP from Temporal activities. The reasoning service is pure cognitive: it receives data, returns structured reasoning output, and has no persistence or GitHub I/O. Actor routing remains in the control plane as it requires no LLM. All LLM inference routes through a centralized proxy for credential management and provider routing.
 
 ---
 

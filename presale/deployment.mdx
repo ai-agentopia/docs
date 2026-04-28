@@ -101,6 +101,12 @@ All dependencies are open-source and Kubernetes-native. No vendor lock-in.
 | **Audit logging** | Every governance tool call logged with actor, role, decision |
 | **Session management** | Cookie-based BFF sessions with configurable expiry |
 
+## Live Environments
+
+Agentopia ships with separate development and validation environments. Each environment runs as an independent Kubernetes namespace with its own services, storage, and LLM routing. Environments are isolated from each other and promoted independently via ArgoCD.
+
+Environment access is controlled — contact your Agentopia administrator for access details.
+
 ## Scaling Model
 
 | Dimension | How it scales |

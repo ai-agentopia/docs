@@ -18,7 +18,7 @@ graph TB
 
     subgraph External["External Services"]
         GH["GitHub"]
-        LLM["LLM Providers"]
+        PROVIDERS["LLM Providers"]
     end
 
     subgraph Platform["Agentopia Platform"]
@@ -39,8 +39,16 @@ graph TB
 
         subgraph Orchestration["Durable Orchestration"]
             TEMPORAL["Workflow Engine"]
-            PLANNER["AI Planner"]
             ROUTER["Agent Router"]
+        end
+
+        subgraph Reasoning["Reasoning Service"]
+            PLANNER["Planner Graph"]
+            REVIEWER["Reviewer Shadow"]
+        end
+
+        subgraph LLMLayer["LLM Routing"]
+            PROXY["LLM Proxy"]
         end
 
         subgraph Agents["Agent Pods"]
@@ -59,12 +67,16 @@ graph TB
     APP -->|"Manage bots"| ADMIN
 
     CHAT -->|"Proxy"| BOT_SA & BOT_DEV & BOT_QA
-    BOT_SA & BOT_DEV & BOT_QA -->|"LLM calls"| LLM
     BOT_SA & BOT_DEV & BOT_QA -->|"Authorization"| GOVS
 
     DISPATCH -->|"Task dispatch"| BOT_DEV & BOT_QA
     GOVS -->|"Code operations"| GH
-    TEMPORAL --> PLANNER & ROUTER
+    TEMPORAL -->|"Schedule"| ROUTER
+
+    Core -->|"Plan request"| Reasoning
+    Reasoning -->|"LLM inference"| PROXY
+    Core -->|"LLM inference"| PROXY
+    PROXY -->|"Route"| PROVIDERS
 
     Core --> DB
     TEMPORAL --> DB
@@ -210,7 +222,7 @@ Seven ADRs (008-014) lock the architecture: tenancy/isolation, governance, runti
 | **Web App** | React, Vite, Tailwind | Unified operator interface |
 | **API Server** | Python, FastAPI | Control plane, BFF, governance |
 | **Workflow Engine** | Temporal | Durable orchestration with signals, retries, timeouts |
-| **AI Planning** | LangGraph | Objective decomposition, review analysis, routing decisions |
+| **Reasoning Service** | LangGraph (dedicated service) | Objective decomposition, review shadow analysis |
 | **Agent Runtime** | OpenClaw-based gateway | LLM orchestration, tool execution, memory |
 | **Agent Communication** | A2A Protocol (JSON-RPC) | Agent-to-agent task dispatch and consultation |
 | **Semantic Memory** | Qdrant + Neo4j | Vector search + knowledge graph per agent |
@@ -224,13 +236,16 @@ Seven ADRs (008-014) lock the architecture: tenancy/isolation, governance, runti
 
 ## Key Design Decisions
 
-### Hybrid orchestration stack
+### Multi-plane architecture
 
-The platform separates concerns across three layers:
+The platform separates concerns across four planes:
 
-- **Platform layer** — owns domain state, governance enforcement, and external API execution. This is the source of truth for workflows, work packets, role bindings, and audit records.
+- **Control plane** — owns domain state, governance enforcement, feature flags, deterministic fallback, and external API execution (GitHub milestones, issues, merges). This is the source of truth for workflows, work packets, role bindings, and audit records.
 - **Workflow engine** — owns durable orchestration lifecycle. Handles state machine execution, signal routing, timeout management, and activity scheduling with guaranteed delivery.
-- **AI cognitive layer** — owns planning and reasoning decisions. Runs ephemerally inside workflow activities with no direct I/O or persistence. Pure computation.
+- **Reasoning plane** — owns AI-powered planning and review analysis. Runs as a dedicated service with its own LLM calls and validation logic. Returns structured reasoning output that the control plane can accept or fall back from. Has no persistence, no GitHub access, and no workflow state.
+- **LLM routing layer** — centralizes all server-side LLM inference through a multi-provider proxy. Handles credential management, provider routing, Codex account rotation, and failover. No backend or reasoning service holds provider credentials directly.
+
+This separation means reasoning suggestions never bypass governance. The control plane decides whether to use AI planning output or fall back to deterministic defaults — the reasoning service cannot force a workflow transition or create artifacts on its own.
 
 ### Governance-first execution
 
