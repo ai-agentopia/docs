@@ -68,6 +68,7 @@
               "architecture/harness-control/capability-class-rollout-guide",
               "architecture/harness-control/tools-allow-rendering",
               "architecture/harness-control/admin-tool-contract",
+              "architecture/harness-control/entry-path-inventory",
               "architecture/harness-control/orchestrated-multi-agent-platform-partial-harness-control",
               "architecture/harness-control/harness-system-deep-dive-debate",
               "architecture/harness-control/hitl-checkpoint-feasibility-debate"
